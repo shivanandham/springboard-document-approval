@@ -47,7 +47,7 @@ Interactive docs: `/docs`. Every error has the same shape:
 {"error": {"code": "VALIDATION_ERROR", "message": "A comment is required when rejecting a document", "fields": {"comment": "Required when rejecting"}}}
 ```
 
-Codes: `VALIDATION_ERROR` 400, `UNAUTHENTICATED` 401, `FORBIDDEN` 403, `NOT_FOUND` 404, `INVALID_TRANSITION` / `CONFLICT` 409, `FILE_TOO_LARGE` 413, `UNSUPPORTED_FILE_TYPE` 415.
+Codes: `VALIDATION_ERROR` 400, `UNAUTHENTICATED` 401, `FORBIDDEN` 403, `NOT_FOUND` 404, `INVALID_TRANSITION` / `CONFLICT` 409, `FILE_TOO_LARGE` 413, `UNSUPPORTED_FILE_TYPE` 415, `RATE_LIMITED` 429 (with `Retry-After`).
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
@@ -180,7 +180,7 @@ Uploads are streamed to disk in 1 MB chunks and hashed as they're written. Uploa
 - **No resubmission yet.** A rejected document is final. `document_events` already records every transition, so a "changes requested" state slots into `decide()` and the enum.
 - **No background workers.** There's nothing to run asynchronously yet: validation, hashing and storage all fit inside the request. See next steps.
 - **Two frontend apps.** The submitter and reviewer get separate deployable apps on separate domains. They share no code at runtime, so each one stays small and obvious.
-- **Auth.** Access tokens are JWTs that live for 15 minutes and are kept in memory only. Refresh tokens are random, stored only as a sha256 hash, sent as an httpOnly SameSite=Lax cookie (`Secure` when `COOKIE_SECURE=true`) and rotated on every use. Reusing a rotated token revokes the whole token family.
+- **Auth.** Access tokens are JWTs that live for 15 minutes and are kept in memory only. Refresh tokens are random, stored only as a sha256 hash, sent as an httpOnly SameSite=Lax cookie (`Secure` when `COOKIE_SECURE=true`) and rotated on every use. Reusing a rotated token revokes the whole token family. Login is rate limited in memory (sliding window, single worker): 5 attempts a minute per client IP and email, and 20 per client IP.
 
 ## Tests
 
@@ -194,7 +194,7 @@ The schema comes from running the Alembic migrations, not `create_all`. Each tes
 | File | Covers |
 |---|---|
 | `test_migrations.py` | upgrade → downgrade base → upgrade, and the seed data |
-| `test_auth.py` | login, wrong password, unknown email, inactive user, expired and tampered tokens, refresh rotation, reuse detection, logout, `/me` |
+| `test_auth.py` | login, wrong password, unknown email, inactive user, expired and tampered tokens, refresh rotation, reuse detection, logout, `/me`, login rate limits |
 | `test_rbac.py` | a matrix of every endpoint × {anonymous, submitter, reviewer, other submitter} |
 | `test_documents_create.py` | happy path with sha256, missing or long title, missing, empty, too large or wrong-type file, the event row |
 | `test_documents_read.py` | ownership, status filter, pagination and total, sort, 404 on others' documents, download rules |
@@ -217,7 +217,7 @@ TODO
 - Email or webhook notifications on decisions.
 - A resubmit / "changes requested" state.
 - Multi-step approvals.
-- Rate limiting, especially on login.
+- Rate limiting beyond login, backed by Redis once there's more than one worker.
 - Structured logging and request tracing.
 - CI that runs the test suite and the e2e test on every push.
 - A background job for retention.

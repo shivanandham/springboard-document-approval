@@ -1,6 +1,10 @@
 import hashlib
+import math
 import secrets
+import time
 import uuid
+from collections import defaultdict, deque
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -45,6 +49,45 @@ async def authenticate(session: AsyncSession, email: str, password: str) -> User
     if not (user and valid and user.is_active):
         raise unauthenticated("Invalid email or password")
     return user
+
+
+class RateLimiter:
+    """In-memory sliding window. Per process, which is fine for the single uvicorn worker."""
+
+    def __init__(self, limit: int, window: float = 60, clock: Callable[[], float] = time.monotonic):
+        self.limit, self.window, self.clock = limit, window, clock
+        self.hits: defaultdict[str, deque[float]] = defaultdict(deque)
+
+    def hit(self, key: str) -> int:
+        """Record an attempt. Returns 0 if allowed, else the seconds until the next slot."""
+        now, hits = self.clock(), self.hits[key]
+        while hits and hits[0] <= now - self.window:
+            hits.popleft()
+        if len(hits) >= self.limit:
+            return max(1, math.ceil(hits[0] + self.window - now))
+        hits.append(now)
+        return 0
+
+    def reset(self) -> None:
+        self.hits.clear()
+
+
+login_ip_limiter = RateLimiter(20)
+login_account_limiter = RateLimiter(5)
+
+
+def check_login_rate(client_ip: str, email: str) -> None:
+    for limiter, key in (
+        (login_ip_limiter, client_ip),
+        (login_account_limiter, f"{client_ip}|{email.strip().lower()}"),
+    ):
+        if wait := limiter.hit(key):
+            raise AppError(
+                429,
+                "RATE_LIMITED",
+                f"Too many login attempts. Try again in {wait} seconds.",
+                headers={"Retry-After": str(wait)},
+            )
 
 
 def create_access_token(user: User) -> str:

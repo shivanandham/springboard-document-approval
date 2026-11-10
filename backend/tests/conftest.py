@@ -18,6 +18,7 @@ from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
+from app import security  # noqa: E402
 from app.db import engine, get_session  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Document, DocumentStatus, Role, User  # noqa: E402
@@ -34,6 +35,12 @@ def database():
     command.upgrade(ALEMBIC, "head")
     yield
     shutil.rmtree(settings.storage_dir, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limits():
+    security.login_ip_limiter.reset()
+    security.login_account_limiter.reset()
 
 
 @pytest.fixture

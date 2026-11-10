@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, Response
+from fastapi import APIRouter, Cookie, Depends, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app import security
@@ -29,13 +29,18 @@ def _tokens(response: Response, user: User, refresh_token: str) -> TokenOut:
     return TokenOut(access_token=security.create_access_token(user))
 
 
-@router.post("/login", summary="Log in with email and password")
+@router.post(
+    "/login", summary="Log in with email and password", responses={429: {"model": ErrorOut}}
+)
 async def login(
+    request: Request,
     response: Response,
     session: SessionDep,
     form: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> TokenOut:
-    """Returns an access token and sets a rotating refresh token as an httpOnly cookie."""
+    """Returns an access token and sets a rotating refresh token as an httpOnly cookie.
+    Limited to 5 attempts a minute per client IP and email, and 20 per client IP."""
+    security.check_login_rate(request.client.host if request.client else "", form.username)
     user = await security.authenticate(session, form.username, form.password)
     refresh_token, _ = await security.issue_refresh_token(session, user.id)
     await session.commit()

@@ -1,8 +1,10 @@
 from datetime import UTC, datetime, timedelta
 
 import jwt
+import pytest
 from sqlalchemy import select
 
+from app import security
 from app.config import settings
 from app.models import RefreshToken
 
@@ -206,3 +208,55 @@ async def test_me_merges_permissions_of_several_roles(client, make_user, auth):
     resp = await client.get("/api/auth/me", headers=auth(user))
     assert resp.json()["roles"] == ["reviewer", "submitter"]
     assert len(resp.json()["permissions"]) == 6
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    # Skip argon2 so dozens of attempts stay fast; "wrong" is the only bad password here.
+    monkeypatch.setattr(security, "verify_password", lambda password, _: password != "wrong")
+    now = [1000.0]
+    for limiter in (security.login_ip_limiter, security.login_account_limiter):
+        monkeypatch.setattr(limiter, "clock", lambda: now[0])
+    return now
+
+
+def assert_rate_limited(resp, retry_after):
+    assert resp.status_code == 429
+    assert resp.json()["error"]["code"] == "RATE_LIMITED"
+    assert resp.json()["error"]["message"] == (
+        f"Too many login attempts. Try again in {retry_after} seconds."
+    )
+    assert resp.headers["retry-after"] == str(retry_after)
+
+
+async def test_login_rate_limit_per_account(login, make_user, clock):
+    await make_user("submitter", email="sam@example.com")
+    for _ in range(4):
+        assert (await login("sam@example.com", "wrong")).status_code == 401
+    assert (await login("SAM@example.com")).status_code == 200  # successes count too
+    clock[0] += 15
+    assert_rate_limited(await login("sam@example.com"), 45)
+    assert (await login("someone-else@example.com")).status_code == 401
+
+
+async def test_login_rate_limit_per_ip_across_emails(login, clock):
+    for i in range(20):
+        assert (await login(f"user{i}@example.com")).status_code == 401
+    assert_rate_limited(await login("fresh@example.com"), 60)
+
+
+async def test_login_rate_limit_window_expires(login, make_user, clock):
+    await make_user("submitter", email="sam@example.com")
+    for _ in range(5):
+        await login("sam@example.com", "wrong")
+    assert_rate_limited(await login("sam@example.com"), 60)
+    clock[0] += 60
+    assert (await login("sam@example.com")).status_code == 200
+
+
+async def test_rate_limit_only_applies_to_login(client, login, make_user, auth, clock):
+    user = await make_user("submitter")
+    for _ in range(25):
+        await login("sam@example.com", "wrong")
+    assert (await client.get("/api/auth/me", headers=auth(user))).status_code == 200
+    assert (await client.post("/api/auth/refresh")).status_code == 401
