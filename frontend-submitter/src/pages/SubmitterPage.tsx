@@ -1,110 +1,175 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { cn } from 'cn'
+import { FileStack, Loader2, UploadCloud, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useDropzone } from 'react-dropzone'
+import { useController, useForm, type Control } from 'react-hook-form'
 import { toast } from 'sonner'
 import { z } from 'zod'
-import { api, ApiError, formatDate, PAGE_SIZE, type Document } from '@/api'
-import { Badge } from '@/components/ui/badge'
+import { api, ApiError, PAGE_SIZE, type Document } from '@/api'
+import { DocumentPanel } from '@/components/DocumentPanel'
+import { enter, FileIcon, formatSize, PageHeading, Pagination, RelativeTime, rowMotion, StatusPill, TablePlaceholder } from '@/components/common'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 const ACCEPTED = ['.pdf', '.docx', '.png', '.jpg', '.jpeg', '.txt']
+const MAX_BYTES = 10 * 1024 * 1024
 
 const schema = z.object({
   title: z.string().trim().min(1, 'Title is required').max(200, 'Title must be at most 200 characters'),
   description: z.string().trim(),
   file: z
-    .instanceof(FileList)
-    .refine((files) => files.length === 1, 'Choose a file')
-    .refine((files) => ACCEPTED.some((ext) => files[0]?.name.toLowerCase().endsWith(ext)), 'Accepted types: PDF, DOCX, PNG, JPG, TXT'),
+    .instanceof(File, { message: 'Choose a file' })
+    .refine((file) => ACCEPTED.some((ext) => file.name.toLowerCase().endsWith(ext)), 'Accepted types: PDF, DOCX, PNG, JPG, TXT')
+    .refine((file) => file.size <= MAX_BYTES, 'The file must be 10 MB or smaller'),
 })
 
-const STATUS = {
-  pending: { label: 'Pending', className: 'bg-muted text-muted-foreground' },
-  approved: { label: 'Approved', className: 'bg-emerald-100 text-emerald-800' },
-  rejected: { label: 'Rejected', className: 'bg-red-100 text-red-800' },
-}
+type Values = z.input<typeof schema>
 
-function StatusBadge({ doc }: { doc: Document }) {
-  const badge = (
-    <motion.span key={doc.status} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="inline-flex">
-      <Badge className={STATUS[doc.status].className}>{STATUS[doc.status].label}</Badge>
-    </motion.span>
-  )
-  if (doc.status !== 'rejected' || !doc.decision_comment) return badge
+/** A stroke-drawn check that plays once after a successful upload. */
+function UploadedCheck({ onDone }: { onDone: () => void }) {
   return (
-    <Tooltip>
-      <TooltipTrigger className="cursor-help">{badge}</TooltipTrigger>
-      <TooltipContent className="max-w-xs">{doc.decision_comment}</TooltipContent>
-    </Tooltip>
+    <motion.svg viewBox="0 0 24 24" className="size-5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" strokeWidth={2.25} strokeLinecap="round" strokeLinejoin="round">
+      <motion.circle cx="12" cy="12" r="9" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.45, ease: 'easeOut' }} />
+      <motion.path
+        d="m8.5 12.5 2.5 2.5 4.5-5"
+        initial={{ pathLength: 0, opacity: 1 }}
+        animate={{ pathLength: 1, opacity: [1, 1, 0] }}
+        transition={{ pathLength: { delay: 0.35, duration: 0.3 }, opacity: { delay: 0.65, duration: 1.1, times: [0, 0.7, 1] } }}
+        onAnimationComplete={onDone}
+      />
+    </motion.svg>
   )
 }
 
-function FileLink({ doc }: { doc: Document }) {
-  if (!doc.file) return <span className="text-muted-foreground">—</span>
-  return (
-    <Button variant="link" className="h-auto max-w-56 justify-start truncate p-0" onClick={() => api.download(doc).catch((error) => toast.error(error.message))}>
-      {doc.file.original_name}
-    </Button>
-  )
-}
+function DropZone({ control, uploading, uploaded, onUploadedShown }: { control: Control<Values>; uploading: boolean; uploaded: boolean; onUploadedShown: () => void }) {
+  const { field, fieldState } = useController({ control, name: 'file' })
+  const file = field.value as File | undefined
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    multiple: false,
+    disabled: uploading,
+    onDrop: (accepted, rejected) => field.onChange(accepted[0] ?? rejected[0]?.file),
+  })
 
-function TableMessage({ columns, loading, message }: { columns: number; loading: boolean; message: string }) {
-  if (loading)
-    return Array.from({ length: 3 }, (_, i) => (
-      <TableRow key={i}>
-        <TableCell colSpan={columns}>
-          <Skeleton className="h-5 w-full" />
-        </TableCell>
-      </TableRow>
-    ))
   return (
-    <TableRow>
-      <TableCell colSpan={columns} className="py-10 text-center text-muted-foreground">
-        {message}
-      </TableCell>
-    </TableRow>
-  )
-}
-
-const rowMotion = {
-  initial: { opacity: 0, y: -6 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, x: 12 },
-  className: 'border-b transition-colors hover:bg-muted/50',
-} as const
-
-function Pagination({ page, total, onChange }: { page: number; total: number; onChange: (page: number) => void }) {
-  if (total <= PAGE_SIZE) return null
-  const start = page * PAGE_SIZE
-  return (
-    <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-      <span className="mr-2">
-        {start + 1}–{Math.min(start + PAGE_SIZE, total)} of {total}
-      </span>
-      <Button variant="outline" size="sm" disabled={page === 0} onClick={() => onChange(page - 1)}>
-        Prev
-      </Button>
-      <Button variant="outline" size="sm" disabled={start + PAGE_SIZE >= total} onClick={() => onChange(page + 1)}>
-        Next
-      </Button>
+    <div className="h-full overflow-hidden">
+      <AnimatePresence mode="wait" initial={false}>
+        {file ? (
+          <motion.div
+            key="file"
+            initial={{ opacity: 0, x: '100%' }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: '100%' }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className={cn('relative flex h-full min-h-40 items-center gap-3 overflow-hidden rounded-xl border bg-card p-4', fieldState.invalid && 'border-destructive/60')}
+          >
+            <FileIcon contentType={file.type} className="size-10" />
+            <div className="grid min-w-0 flex-1 gap-0.5">
+              <p className="truncate text-sm font-medium">{file.name}</p>
+              <p className="text-xs text-muted-foreground">{uploading ? 'Uploading…' : formatSize(file.size)}</p>
+            </div>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="Remove file" disabled={uploading} onClick={() => field.onChange(undefined)}>
+              <X />
+            </Button>
+            {uploading && (
+              <div role="progressbar" aria-label="Uploading" className="absolute inset-x-0 bottom-0 h-1 overflow-hidden bg-primary/10">
+                <motion.div className="h-full w-2/5 rounded-full bg-primary" animate={{ x: ['-100%', '250%'] }} transition={{ duration: 1.1, ease: 'easeInOut', repeat: Infinity }} />
+              </div>
+            )}
+          </motion.div>
+        ) : (
+          <motion.div
+            key="zone"
+            exit={{ opacity: 0, x: '100%' }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            {...(getRootProps() as object)}
+            className={cn(
+              'flex h-full min-h-40 cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-input bg-muted/40 p-6 text-center transition-colors outline-none hover:border-primary/50 hover:bg-primary/[0.03] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
+              isDragActive && 'border-primary bg-primary/5',
+              fieldState.invalid && 'border-destructive/60',
+            )}
+          >
+            <input {...getInputProps({ id: 'file', accept: ACCEPTED.join(','), 'aria-invalid': fieldState.invalid })} />
+            <span className="grid size-10 place-items-center rounded-full bg-card shadow-xs ring-1 ring-foreground/10">
+              {uploaded ? <UploadedCheck onDone={onUploadedShown} /> : <UploadCloud className="size-5 text-muted-foreground" />}
+            </span>
+            <div className="grid gap-1">
+              <p className="text-sm">
+                {isDragActive ? (
+                  'Drop to attach'
+                ) : (
+                  <>
+                    Drop a file or <span className="font-medium text-primary underline-offset-4 hover:underline">browse</span>
+                  </>
+                )}
+              </p>
+              <p className="text-xs text-muted-foreground">PDF, DOCX, PNG, JPG or TXT · up to 10 MB</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
+  )
+}
+
+function DocumentRow({ doc, index, onOpen }: { doc: Document; index: number; onOpen: () => void }) {
+  const pill = <StatusPill status={doc.status} />
+  return (
+    <motion.tr
+      {...rowMotion(index)}
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => event.key === 'Enter' && onOpen()}
+      className="cursor-pointer border-b transition-colors outline-none hover:bg-muted/50 focus-visible:bg-muted/50"
+    >
+      <TableCell className="px-4 py-3">
+        <div className="flex items-center gap-3">
+          <FileIcon contentType={doc.file?.content_type} />
+          <div className="grid min-w-0 gap-0.5">
+            <span className="max-w-[22rem] truncate font-medium">{doc.title}</span>
+            {doc.file && (
+              <span className="max-w-[22rem] truncate text-xs text-muted-foreground">
+                {doc.file.original_name} · {formatSize(doc.file.size_bytes)}
+              </span>
+            )}
+          </div>
+        </div>
+      </TableCell>
+      <TableCell className="hidden px-4 py-3 text-muted-foreground sm:table-cell">
+        <RelativeTime iso={doc.created_at} />
+      </TableCell>
+      <TableCell className="px-4 py-3 text-right">
+        {doc.status === 'rejected' && doc.decision_comment ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex cursor-help">{pill}</span>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">{doc.decision_comment}</TooltipContent>
+          </Tooltip>
+        ) : (
+          pill
+        )}
+      </TableCell>
+    </motion.tr>
   )
 }
 
 export default function SubmitterPage() {
   const queryClient = useQueryClient()
   const [page, setPage] = useState(0)
+  const [selected, setSelected] = useState<Document | null>(null)
+  const [uploaded, setUploaded] = useState(false)
   const documents = useQuery({ queryKey: ['documents', 'mine', page], queryFn: () => api.listDocuments(page), placeholderData: keepPreviousData })
-  const { register, handleSubmit, reset, setError, formState } = useForm({ resolver: zodResolver(schema), defaultValues: { title: '', description: '' } })
+  const { register, control, handleSubmit, reset, setError, formState } = useForm<Values, unknown, z.output<typeof schema>>({
+    resolver: zodResolver(schema),
+    defaultValues: { title: '', description: '' },
+  })
   const { errors } = formState
 
   const submit = useMutation({
@@ -112,12 +177,13 @@ export default function SubmitterPage() {
       const body = new FormData()
       body.append('title', values.title)
       if (values.description) body.append('description', values.description)
-      body.append('file', values.file[0])
+      body.append('file', values.file)
       return api.createDocument(body)
     },
     onSuccess: () => {
       toast.success('Document submitted')
       reset()
+      setUploaded(true)
       setPage(0)
       queryClient.invalidateQueries({ queryKey: ['documents'] })
     },
@@ -136,68 +202,64 @@ export default function SubmitterPage() {
 
   return (
     <>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Submit a document</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit((values) => submit.mutate(values))} className="grid gap-4" noValidate>
-            <div className="grid gap-2">
-              <Label htmlFor="title">Title</Label>
-              <Input id="title" aria-invalid={!!errors.title} {...register('title')} />
-              {errors.title && <p className="text-sm text-destructive">{errors.title.message}</p>}
+      <PageHeading title="My documents" subtitle="Submit documents for review and track their status." />
+
+      <motion.section {...enter(0.15)} className="rounded-xl border bg-card shadow-xs">
+        <div className="border-b px-5 py-4">
+          <h2 className="text-sm font-semibold">New document</h2>
+        </div>
+        <form onSubmit={handleSubmit((values) => submit.mutate(values))} noValidate>
+          <div className="grid gap-5 p-5 md:grid-cols-2">
+            <div className="grid content-start gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="title">Title</Label>
+                <Input id="title" className="h-9" aria-invalid={!!errors.title} {...register('title')} />
+                {errors.title && <p className="text-sm text-destructive">{errors.title.message}</p>}
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="description">
+                  Description <span className="font-normal text-muted-foreground">(optional)</span>
+                </Label>
+                <Textarea id="description" rows={4} className="min-h-24 resize-none" {...register('description')} />
+              </div>
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="description">
-                Description <span className="font-normal text-muted-foreground">(optional)</span>
-              </Label>
-              <Textarea id="description" rows={3} {...register('description')} />
-            </div>
-            <div className="grid gap-2">
+            <div className="grid grid-rows-[auto_1fr_auto] gap-2">
               <Label htmlFor="file">File</Label>
-              <Input id="file" type="file" accept={ACCEPTED.join(',')} aria-invalid={!!errors.file} {...register('file')} />
+              <DropZone control={control} uploading={submit.isPending} uploaded={uploaded} onUploadedShown={() => setUploaded(false)} />
               {errors.file && <p className="text-sm text-destructive">{errors.file.message}</p>}
             </div>
-            <Button type="submit" className="justify-self-end" disabled={submit.isPending}>
+          </div>
+          <div className="flex justify-end border-t px-5 py-3">
+            <Button type="submit" className="h-9 px-4" disabled={submit.isPending}>
+              {submit.isPending && <Loader2 className="animate-spin" />}
               Submit
             </Button>
-          </form>
-        </CardContent>
-      </Card>
+          </div>
+        </form>
+      </motion.section>
 
-      <section className="grid gap-3">
-        <h2 className="text-lg font-medium">My documents</h2>
-        <div className="rounded-xl bg-background ring-1 ring-foreground/10">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Title</TableHead>
-                <TableHead>File</TableHead>
-                <TableHead>Submitted</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.length === 0 && <TableMessage columns={4} loading={documents.isPending} message="No documents yet. Submitted documents will appear here." />}
-              <AnimatePresence initial={false}>
-                {items.map((doc) => (
-                  <motion.tr key={doc.id} {...rowMotion}>
-                    <TableCell className="font-medium">{doc.title}</TableCell>
-                    <TableCell>
-                      <FileLink doc={doc} />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{formatDate(doc.created_at)}</TableCell>
-                    <TableCell>
-                      <StatusBadge doc={doc} />
-                    </TableCell>
-                  </motion.tr>
-                ))}
-              </AnimatePresence>
-            </TableBody>
-          </Table>
-        </div>
+      <motion.section {...enter(0.2)} className="overflow-hidden rounded-xl border bg-card shadow-xs">
+        <Table>
+          <TableHeader className="bg-muted/50">
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="h-10 px-4 text-xs text-muted-foreground">Document</TableHead>
+              <TableHead className="hidden h-10 px-4 text-xs text-muted-foreground sm:table-cell">Submitted</TableHead>
+              <TableHead className="h-10 px-4 text-right text-xs text-muted-foreground">Status</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.length === 0 && <TablePlaceholder columns={3} loading={documents.isPending} icon={FileStack} message="No documents yet. Your submissions will appear here." />}
+            <AnimatePresence>
+              {items.map((doc, index) => (
+                <DocumentRow key={doc.id} doc={doc} index={index} onOpen={() => setSelected(doc)} />
+              ))}
+            </AnimatePresence>
+          </TableBody>
+        </Table>
         <Pagination page={page} total={total} onChange={setPage} />
-      </section>
+      </motion.section>
+
+      <DocumentPanel doc={selected} onClose={() => setSelected(null)} />
     </>
   )
 }

@@ -1,17 +1,17 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, X } from 'lucide-react'
+import { Check, Inbox, Loader2, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { z } from 'zod'
-import { api, ApiError, formatDate, PAGE_SIZE, type Document, type DocumentStatus } from '@/api'
-import { Badge } from '@/components/ui/badge'
+import { api, ApiError, PAGE_SIZE, type Document, type DocumentStatus } from '@/api'
+import { DocumentPanel } from '@/components/DocumentPanel'
+import { enter, FileIcon, formatSize, PageHeading, Pagination, RelativeTime, rowMotion, StatusPill, TablePlaceholder, UserAvatar } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
@@ -22,76 +22,33 @@ type Decision = { doc: Document; decision: 'approve' | 'reject'; comment?: strin
 
 const schema = z.object({ comment: z.string().trim().min(1, 'A comment is required to reject') })
 
-const STATUS = {
-  pending: { label: 'Pending', className: 'bg-muted text-muted-foreground' },
-  approved: { label: 'Approved', className: 'bg-emerald-100 text-emerald-800' },
-  rejected: { label: 'Rejected', className: 'bg-red-100 text-red-800' },
+const EMPTY: Record<Tab, string> = {
+  pending: "You're all caught up. Nothing is waiting for review.",
+  approved: 'No approved documents yet.',
+  rejected: 'No rejected documents yet.',
+  all: 'No documents yet.',
 }
 
-function StatusBadge({ doc }: { doc: Document }) {
-  const badge = (
-    <motion.span key={doc.status} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="inline-flex">
-      <Badge className={STATUS[doc.status].className}>{STATUS[doc.status].label}</Badge>
-    </motion.span>
-  )
-  if (doc.status !== 'rejected' || !doc.decision_comment) return badge
+function RowAction({ label, onClick, disabled, children, className }: { label: string; onClick: () => void; disabled: boolean; children: ReactNode; className: string }) {
   return (
     <Tooltip>
-      <TooltipTrigger className="cursor-help">{badge}</TooltipTrigger>
-      <TooltipContent className="max-w-xs">{doc.decision_comment}</TooltipContent>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={label}
+          disabled={disabled}
+          className={className}
+          onClick={(event) => {
+            event.stopPropagation()
+            onClick()
+          }}
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
     </Tooltip>
-  )
-}
-
-function FileLink({ doc }: { doc: Document }) {
-  if (!doc.file) return <span className="text-muted-foreground">—</span>
-  return (
-    <Button variant="link" className="h-auto max-w-56 justify-start truncate p-0" onClick={() => api.download(doc).catch((error) => toast.error(error.message))}>
-      {doc.file.original_name}
-    </Button>
-  )
-}
-
-function TableMessage({ columns, loading, message }: { columns: number; loading: boolean; message: string }) {
-  if (loading)
-    return Array.from({ length: 3 }, (_, i) => (
-      <TableRow key={i}>
-        <TableCell colSpan={columns}>
-          <Skeleton className="h-5 w-full" />
-        </TableCell>
-      </TableRow>
-    ))
-  return (
-    <TableRow>
-      <TableCell colSpan={columns} className="py-10 text-center text-muted-foreground">
-        {message}
-      </TableCell>
-    </TableRow>
-  )
-}
-
-const rowMotion = {
-  initial: { opacity: 0, y: -6 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, x: 12 },
-  className: 'border-b transition-colors hover:bg-muted/50',
-} as const
-
-function Pagination({ page, total, onChange }: { page: number; total: number; onChange: (page: number) => void }) {
-  if (total <= PAGE_SIZE) return null
-  const start = page * PAGE_SIZE
-  return (
-    <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-      <span className="mr-2">
-        {start + 1}–{Math.min(start + PAGE_SIZE, total)} of {total}
-      </span>
-      <Button variant="outline" size="sm" disabled={page === 0} onClick={() => onChange(page - 1)}>
-        Prev
-      </Button>
-      <Button variant="outline" size="sm" disabled={start + PAGE_SIZE >= total} onClick={() => onChange(page + 1)}>
-        Next
-      </Button>
-    </div>
   )
 }
 
@@ -99,6 +56,7 @@ export default function ReviewerPage() {
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<Tab>('pending')
   const [rejecting, setRejecting] = useState<Document | null>(null)
+  const [selected, setSelected] = useState<Document | null>(null)
   const [page, setPage] = useState(0)
   const documents = useQuery({
     queryKey: ['documents', tab, page],
@@ -134,9 +92,8 @@ export default function ReviewerPage() {
   if (page > lastPage) setPage(lastPage)
 
   return (
-    <section className="grid gap-4">
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-lg font-medium">Documents</h1>
+    <>
+      <PageHeading title="Review queue" subtitle="Documents awaiting your decision">
         <Tabs
           value={tab}
           onValueChange={(value) => {
@@ -144,53 +101,82 @@ export default function ReviewerPage() {
             setPage(0)
           }}
         >
-          <TabsList>
-            <TabsTrigger value="pending">Pending</TabsTrigger>
-            <TabsTrigger value="approved">Approved</TabsTrigger>
-            <TabsTrigger value="rejected">Rejected</TabsTrigger>
-            <TabsTrigger value="all">All</TabsTrigger>
+          <TabsList className="h-9 border bg-muted/60 p-0.5">
+            {(['pending', 'approved', 'rejected', 'all'] as const).map((value) => (
+              <TabsTrigger key={value} value={value} className="px-3 capitalize data-active:bg-card data-active:shadow-xs">
+                {value}
+              </TabsTrigger>
+            ))}
           </TabsList>
         </Tabs>
-      </div>
+      </PageHeading>
 
-      <div className="rounded-xl bg-background ring-1 ring-foreground/10">
+      <motion.section {...enter(0.2)} className="overflow-hidden rounded-xl border bg-card shadow-xs">
         <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Title</TableHead>
-              <TableHead>Submitter</TableHead>
-              <TableHead>Submitted</TableHead>
-              <TableHead>File</TableHead>
-              <TableHead className="text-right">Decision</TableHead>
+          <TableHeader className="bg-muted/50">
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="h-10 px-4 text-xs text-muted-foreground">Document</TableHead>
+              <TableHead className="hidden h-10 px-4 text-xs text-muted-foreground sm:table-cell">Submitter</TableHead>
+              <TableHead className="hidden h-10 px-4 text-xs text-muted-foreground sm:table-cell">Submitted</TableHead>
+              <TableHead className="h-10 px-4 text-right text-xs text-muted-foreground">Decision</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {items.length === 0 && (
-              <TableMessage columns={5} loading={documents.isPending} message={tab === 'all' ? 'No documents yet.' : `No ${tab} documents.`} />
-            )}
-            <AnimatePresence initial={false}>
-              {items.map((doc) => (
-                <motion.tr key={doc.id} {...rowMotion}>
-                  <TableCell className="font-medium">{doc.title}</TableCell>
-                  <TableCell>{doc.submitter.full_name}</TableCell>
-                  <TableCell className="text-muted-foreground">{formatDate(doc.created_at)}</TableCell>
-                  <TableCell>
-                    <FileLink doc={doc} />
+            {items.length === 0 && <TablePlaceholder columns={4} loading={documents.isPending} icon={Inbox} message={EMPTY[tab]} />}
+            <AnimatePresence>
+              {items.map((doc, index) => (
+                <motion.tr
+                  key={doc.id}
+                  {...rowMotion(index)}
+                  tabIndex={0}
+                  onClick={() => setSelected(doc)}
+                  onKeyDown={(event) => event.key === 'Enter' && event.target === event.currentTarget && setSelected(doc)}
+                  className="cursor-pointer border-b transition-colors outline-none hover:bg-muted/50 focus-visible:bg-muted/50"
+                >
+                  <TableCell className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <FileIcon contentType={doc.file?.content_type} />
+                      <div className="grid min-w-0 gap-0.5">
+                        <span className="max-w-[18rem] truncate font-medium">{doc.title}</span>
+                        {doc.file && (
+                          <span className="max-w-[18rem] truncate text-xs text-muted-foreground">
+                            {doc.file.original_name} · {formatSize(doc.file.size_bytes)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="hidden px-4 py-3 sm:table-cell">
+                    <span className="flex items-center gap-2">
+                      <UserAvatar name={doc.submitter.full_name} size="sm" />
+                      {doc.submitter.full_name}
+                    </span>
+                  </TableCell>
+                  <TableCell className="hidden px-4 py-3 text-muted-foreground sm:table-cell">
+                    <RelativeTime iso={doc.created_at} />
+                  </TableCell>
+                  <TableCell className="px-4 py-3 text-right">
                     {doc.status === 'pending' ? (
-                      <div className="inline-flex gap-2">
-                        <Button size="sm" disabled={busy(doc)} onClick={() => decide.mutate({ doc, decision: 'approve' })}>
-                          <Check />
-                          Approve
-                        </Button>
-                        <Button size="sm" variant="destructive" disabled={busy(doc)} onClick={() => openReject(doc)}>
+                      <div className="inline-flex gap-1">
+                        <RowAction
+                          label="Reject"
+                          disabled={busy(doc)}
+                          onClick={() => openReject(doc)}
+                          className="text-muted-foreground hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-400/10 dark:hover:text-rose-300"
+                        >
                           <X />
-                          Reject
-                        </Button>
+                        </RowAction>
+                        <RowAction
+                          label="Approve"
+                          disabled={busy(doc)}
+                          onClick={() => decide.mutate({ doc, decision: 'approve' })}
+                          className="text-muted-foreground hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-400/10 dark:hover:text-emerald-300"
+                        >
+                          {busy(doc) ? <Loader2 className="animate-spin" /> : <Check />}
+                        </RowAction>
                       </div>
                     ) : (
-                      <StatusBadge doc={doc} />
+                      <StatusPill status={doc.status} />
                     )}
                   </TableCell>
                 </motion.tr>
@@ -198,11 +184,30 @@ export default function ReviewerPage() {
             </AnimatePresence>
           </TableBody>
         </Table>
-      </div>
-      <Pagination page={page} total={total} onChange={setPage} />
+        <Pagination page={page} total={total} onChange={setPage} />
+      </motion.section>
+
+      <DocumentPanel
+        doc={selected}
+        onClose={() => setSelected(null)}
+        footer={(doc) =>
+          doc.status === 'pending' && (
+            <>
+              <Button variant="outline" className="h-9 px-4" disabled={busy(doc)} onClick={() => openReject(doc)}>
+                <X />
+                Reject
+              </Button>
+              <Button className="h-9 px-4" disabled={busy(doc)} onClick={() => decide.mutate({ doc, decision: 'approve' })}>
+                {busy(doc) ? <Loader2 className="animate-spin" /> : <Check />}
+                Approve
+              </Button>
+            </>
+          )
+        }
+      />
 
       <Dialog open={!!rejecting} onOpenChange={(open) => !open && !decide.isPending && setRejecting(null)}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-md">
           <form
             onSubmit={handleSubmit(({ comment }) => rejecting && decide.mutate({ doc: rejecting, decision: 'reject', comment }))}
             className="grid gap-4"
@@ -214,20 +219,21 @@ export default function ReviewerPage() {
             </DialogHeader>
             <div className="grid gap-2">
               <Label htmlFor="comment">Comment</Label>
-              <Textarea id="comment" rows={4} aria-invalid={!!formState.errors.comment} {...register('comment')} />
+              <Textarea id="comment" rows={4} className="resize-none" aria-invalid={!!formState.errors.comment} {...register('comment')} />
               {formState.errors.comment && <p className="text-sm text-destructive">{formState.errors.comment.message}</p>}
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" disabled={decide.isPending} onClick={() => setRejecting(null)}>
                 Cancel
               </Button>
-              <Button type="submit" variant="destructive" disabled={decide.isPending}>
+              <Button type="submit" className="bg-destructive text-white hover:bg-destructive/90" disabled={decide.isPending}>
+                {decide.isPending && <Loader2 className="animate-spin" />}
                 Reject
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
-    </section>
+    </>
   )
 }
