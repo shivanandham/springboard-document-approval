@@ -19,6 +19,18 @@ export type Document = {
   file: { id: string; original_name: string; content_type: string; size_bytes: number; sha256: string; created_at: string } | null
 }
 
+export type DocumentEvent = {
+  id: string
+  event: 'submitted' | 'approved' | 'rejected'
+  from_status: DocumentStatus | null
+  to_status: DocumentStatus
+  comment: string | null
+  actor: UserRef
+  created_at: string
+}
+
+export type DocumentDetail = Document & { events: DocumentEvent[] }
+
 export const PAGE_SIZE = 20
 
 export class ApiError extends Error {
@@ -86,6 +98,7 @@ export const api = {
     json<{ items: Document[]; total: number }>(
       `/documents?${new URLSearchParams({ ...(status && { status }), limit: `${PAGE_SIZE}`, offset: `${page * PAGE_SIZE}`, sort: '-created_at' })}`,
     ),
+  getDocument: (id: string) => json<DocumentDetail>(`/documents/${id}`),
   createDocument: (body: FormData) => json<Document>('/documents', { method: 'POST', body }),
   decide: (doc: Document, decision: 'approve' | 'reject', comment?: string) =>
     json<Document>(`/documents/${doc.id}/decision`, {
@@ -93,13 +106,12 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ decision, comment, version: doc.version }),
     }),
+  fileBlob: (id: string) => send(`/documents/${id}/file`).then((res) => res.blob()),
   async download(doc: Document) {
-    const blob = await (await send(`/documents/${doc.id}/file`)).blob()
+    const blob = await api.fileBlob(doc.id)
     const url = URL.createObjectURL(blob)
     const link = Object.assign(window.document.createElement('a'), { href: url, download: doc.file?.original_name ?? doc.title })
     link.click()
     setTimeout(() => URL.revokeObjectURL(url))
   },
 }
-
-export const formatDate = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
