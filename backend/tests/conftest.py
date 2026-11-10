@@ -1,6 +1,7 @@
 import shutil
 import tempfile
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
 from app.db import engine, get_session  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Role, User  # noqa: E402
+from app.models import Document, DocumentStatus, Role, User  # noqa: E402
 from app.security import create_access_token, hash_password  # noqa: E402
 
 PASSWORD = "correct-horse-battery"
@@ -82,5 +83,60 @@ def make_user(session):
     return factory
 
 
-def auth(user: User) -> dict[str, str]:
+def _auth(user: User) -> dict[str, str]:
     return {"Authorization": f"Bearer {create_access_token(user)}"}
+
+
+@pytest.fixture
+def auth():
+    return _auth
+
+
+@pytest.fixture
+def login(client):
+    async def post(email: str, password: str = PASSWORD):
+        return await client.post("/api/auth/login", data={"username": email, "password": password})
+
+    return post
+
+
+@pytest.fixture
+def make_document(session):
+    async def factory(
+        submitter: User,
+        *,
+        title: str = "Quarterly report",
+        status: DocumentStatus = DocumentStatus.pending,
+        decided_by: User | None = None,
+        created_at: datetime | None = None,
+    ) -> Document:
+        doc = Document(submitter_id=submitter.id, title=title, status=status)
+        if status != DocumentStatus.pending:
+            doc.decided_by_id = (decided_by or submitter).id
+            doc.decided_at = datetime.now(UTC)
+            doc.decision_comment = "Needs another pass" if status == "rejected" else None
+        if created_at:
+            doc.created_at = created_at
+        session.add(doc)
+        await session.commit()
+        return doc
+
+    return factory
+
+
+@pytest.fixture
+def upload(client):
+    async def post(
+        user: User,
+        *,
+        title: str | None = "Quarterly report",
+        content: bytes = b"%PDF-1.7 quarterly numbers",
+        filename: str | None = "report.pdf",
+        description: str | None = None,
+    ):
+        data = {"title": title, "description": description}
+        data = {k: v for k, v in data.items() if v is not None}
+        files = {"file": (filename, content, "application/octet-stream")} if filename else None
+        return await client.post("/api/documents", headers=_auth(user), data=data, files=files)
+
+    return post

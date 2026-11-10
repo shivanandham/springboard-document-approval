@@ -5,11 +5,6 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.models import RefreshToken
-from tests.conftest import PASSWORD, auth
-
-
-async def login(client, email, password=PASSWORD):
-    return await client.post("/api/auth/login", data={"username": email, "password": password})
 
 
 def assert_unauthenticated(resp, message=None):
@@ -19,9 +14,9 @@ def assert_unauthenticated(resp, message=None):
         assert resp.json()["error"]["message"] == message
 
 
-async def test_login_success(client, make_user):
+async def test_login_success(client, make_user, login):
     user = await make_user("submitter", email="sam@example.com")
-    resp = await login(client, "  SAM@example.com ")
+    resp = await login("  SAM@example.com ")
     assert resp.status_code == 200
     body = resp.json()
     assert body["token_type"] == "bearer"
@@ -36,20 +31,18 @@ async def test_login_success(client, make_user):
     assert "SameSite=lax" in cookie
 
 
-async def test_login_wrong_password(client, make_user):
+async def test_login_wrong_password(client, make_user, login):
     await make_user("submitter", email="sam@example.com")
-    assert_unauthenticated(
-        await login(client, "sam@example.com", "nope"), "Invalid email or password"
-    )
+    assert_unauthenticated(await login("sam@example.com", "nope"), "Invalid email or password")
 
 
-async def test_login_unknown_email(client):
-    assert_unauthenticated(await login(client, "ghost@example.com"), "Invalid email or password")
+async def test_login_unknown_email(client, login):
+    assert_unauthenticated(await login("ghost@example.com"), "Invalid email or password")
 
 
-async def test_login_inactive_user(client, make_user):
+async def test_login_inactive_user(client, make_user, login):
     await make_user("submitter", email="gone@example.com", is_active=False)
-    assert_unauthenticated(await login(client, "gone@example.com"), "Invalid email or password")
+    assert_unauthenticated(await login("gone@example.com"), "Invalid email or password")
 
 
 async def test_login_missing_fields(client):
@@ -58,7 +51,7 @@ async def test_login_missing_fields(client):
     assert "password" in resp.json()["error"]["fields"]
 
 
-async def test_inactive_user_with_valid_token(client, make_user, session):
+async def test_inactive_user_with_valid_token(client, make_user, session, auth):
     user = await make_user("submitter")
     headers = auth(user)
     user.is_active = False
@@ -77,7 +70,7 @@ async def test_expired_access_token(client, make_user):
     assert_unauthenticated(resp, "Invalid or expired token")
 
 
-async def test_tampered_token(client, make_user):
+async def test_tampered_token(client, make_user, auth):
     user = await make_user("submitter")
     header, payload, signature = auth(user)["Authorization"].split(".")
     tampered = f"{header}.{payload}.{signature[::-1]}"
@@ -95,7 +88,7 @@ async def test_token_signed_with_other_secret(client, make_user):
     assert_unauthenticated(resp)
 
 
-async def test_token_for_deleted_user(client, make_user, session):
+async def test_token_for_deleted_user(client, make_user, session, auth):
     user = await make_user("submitter")
     headers = auth(user)
     await session.delete(user)
@@ -107,9 +100,9 @@ async def test_missing_token(client):
     assert_unauthenticated(await client.get("/api/auth/me"), "Not authenticated")
 
 
-async def test_refresh_rotation(client, make_user, session):
+async def test_refresh_rotation(client, make_user, session, login):
     user = await make_user("submitter", email="sam@example.com")
-    first = (await login(client, "sam@example.com")).cookies["refresh_token"]
+    first = (await login("sam@example.com")).cookies["refresh_token"]
 
     resp = await client.post("/api/auth/refresh")
     assert resp.status_code == 200
@@ -127,9 +120,9 @@ async def test_refresh_rotation(client, make_user, session):
     assert first not in {t.token_hash for t in tokens}  # only hashes are stored
 
 
-async def test_reusing_old_refresh_token_revokes_family(client, make_user, session):
+async def test_reusing_old_refresh_token_revokes_family(client, make_user, session, login):
     user = await make_user("submitter", email="sam@example.com")
-    first = (await login(client, "sam@example.com")).cookies["refresh_token"]
+    first = (await login("sam@example.com")).cookies["refresh_token"]
     assert (await client.post("/api/auth/refresh")).status_code == 200
     current = client.cookies["refresh_token"]
 
@@ -151,26 +144,26 @@ async def test_refresh_with_unknown_token(client):
     assert_unauthenticated(await client.post("/api/auth/refresh"), "Invalid refresh token")
 
 
-async def test_refresh_with_expired_token(client, make_user, session):
+async def test_refresh_with_expired_token(client, make_user, session, login):
     user = await make_user("submitter", email="sam@example.com")
-    await login(client, "sam@example.com")
+    await login("sam@example.com")
     token = await session.scalar(select(RefreshToken).where(RefreshToken.user_id == user.id))
     token.expires_at = datetime.now(UTC) - timedelta(seconds=1)
     await session.commit()
     assert_unauthenticated(await client.post("/api/auth/refresh"), "Refresh token expired")
 
 
-async def test_refresh_for_inactive_user(client, make_user, session):
+async def test_refresh_for_inactive_user(client, make_user, session, login):
     user = await make_user("submitter", email="sam@example.com")
-    await login(client, "sam@example.com")
+    await login("sam@example.com")
     user.is_active = False
     await session.commit()
     assert_unauthenticated(await client.post("/api/auth/refresh"), "Invalid refresh token")
 
 
-async def test_logout_revokes_token(client, make_user, session):
+async def test_logout_revokes_token(client, make_user, session, login):
     user = await make_user("submitter", email="sam@example.com")
-    token = (await login(client, "sam@example.com")).cookies["refresh_token"]
+    token = (await login("sam@example.com")).cookies["refresh_token"]
 
     resp = await client.post("/api/auth/logout")
     assert resp.status_code == 204
@@ -187,7 +180,7 @@ async def test_logout_without_cookie(client):
     assert (await client.post("/api/auth/logout")).status_code == 204
 
 
-async def test_me_returns_permissions(client, make_user):
+async def test_me_returns_permissions(client, make_user, auth):
     user = await make_user("reviewer", email="riya@example.com")
     resp = await client.get("/api/auth/me", headers=auth(user))
     assert resp.status_code == 200
@@ -200,7 +193,7 @@ async def test_me_returns_permissions(client, make_user):
     }
 
 
-async def test_me_merges_permissions_of_several_roles(client, make_user):
+async def test_me_merges_permissions_of_several_roles(client, make_user, auth):
     user = await make_user("submitter", "reviewer")
     resp = await client.get("/api/auth/me", headers=auth(user))
     assert resp.json()["roles"] == ["reviewer", "submitter"]

@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.db import SessionDep, engine
-from app.routers import auth
+from app.routers import auth, documents
 from app.schemas import AppError
 
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
@@ -29,9 +29,11 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["Content-Disposition"],
     )
 
     app.include_router(auth.router)
+    app.include_router(documents.router)
 
     @app.exception_handler(AppError)
     async def app_error(_: Request, exc: AppError) -> JSONResponse:

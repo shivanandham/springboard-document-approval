@@ -1,14 +1,15 @@
 import asyncio
 
 from alembic import command
+from alembic.config import Config
 from sqlalchemy import func, select
 
 from app.config import settings
 from app.db import engine
 from app.models import Permission, Role, User
 from app.services import reseed_users
-from tests.conftest import ALEMBIC
 
+ALEMBIC = Config("alembic.ini")
 SEED_EMAILS = {"sam.submitter@docflow.dev", "riya.reviewer@docflow.dev"}
 
 
@@ -41,12 +42,11 @@ async def test_seed_creates_roles_permissions_and_users(session):
     assert users["riya.reviewer@docflow.dev"].full_name == "Riya Menon"
 
 
-async def test_reseed_is_idempotent(client):
+async def test_reseed_is_idempotent(login):
     await reseed_users()
     await reseed_users()
     for email, password in [
         ("sam.submitter@docflow.dev", settings.seed_submitter_password),
         ("riya.reviewer@docflow.dev", settings.seed_reviewer_password),
     ]:
-        resp = await client.post("/api/auth/login", data={"username": email, "password": password})
-        assert resp.status_code == 200
+        assert (await login(email, password)).status_code == 200
