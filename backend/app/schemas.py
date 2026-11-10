@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from app.models import DocumentStatus, EventType
 
@@ -82,7 +82,7 @@ class DocumentPage(BaseModel):
 
 class DecisionIn(BaseModel):
     decision: Literal["approve", "reject"]
-    comment: str | None = None
+    comment: Annotated[str, StringConstraints(strip_whitespace=True, max_length=5000)] | None = None
     version: int = Field(ge=1)
 
 

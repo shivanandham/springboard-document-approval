@@ -81,6 +81,12 @@ async def test_create_strips_path_from_filename(upload, sam):
     assert resp.json()["file"]["original_name"] == "report.pdf"
 
 
+async def test_create_description_length(upload, sam):
+    assert (await upload(sam, description="x" * 5000)).status_code == 201
+    resp = await upload(sam, description="x" * 5001)
+    assert_error(resp, 400, "VALIDATION_ERROR", "description")
+
+
 async def test_create_missing_title(upload, sam):
     assert_error(await upload(sam, title=None), 400, "VALIDATION_ERROR", "title")
 

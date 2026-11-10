@@ -132,6 +132,8 @@ class Document(Base):
             "status <> 'rejected' OR decision_comment IS NOT NULL", name="rejected_has_comment"
         ),
         CheckConstraint("version >= 1", name="version_positive"),
+        CheckConstraint("char_length(description) <= 5000", name="description_length"),
+        CheckConstraint("char_length(decision_comment) <= 5000", name="decision_comment_length"),
         Index("ix_documents_status_created_at", "status", text("created_at DESC")),
     )
 

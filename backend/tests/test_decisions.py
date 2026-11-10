@@ -67,6 +67,12 @@ async def test_reject_without_comment(decide, riya, doc, comment):
     assert "comment" in error["fields"]
 
 
+async def test_comment_length(decide, riya, doc):
+    error = assert_error(await decide(riya, doc.id, "reject", "x" * 5001), 400, "VALIDATION_ERROR")
+    assert "comment" in error["fields"]
+    assert (await decide(riya, doc.id, "reject", "x" * 5000)).status_code == 200
+
+
 async def test_decide_already_decided(decide, riya, make_user, doc):
     assert (await decide(riya, doc.id)).status_code == 200
     raj = await make_user("reviewer")

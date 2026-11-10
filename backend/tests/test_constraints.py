@@ -66,6 +66,22 @@ async def test_valid_decision_passes(connection, doc, reviewer):
     )
 
 
+async def test_description_length(connection, doc):
+    await violates(
+        connection, "UPDATE documents SET description = repeat('x', 5001) WHERE id = :id", id=doc.id
+    )
+
+
+async def test_decision_comment_length(connection, doc, reviewer):
+    await violates(
+        connection,
+        "UPDATE documents SET status = 'rejected', decided_by_id = :r, decided_at = now(),"
+        " decision_comment = repeat('x', 5001) WHERE id = :id",
+        r=reviewer.id,
+        id=doc.id,
+    )
+
+
 async def test_unknown_status_rejected(connection, doc):
     await violates(
         connection, "UPDATE documents SET status = 'archived' WHERE id = :id", DBAPIError, id=doc.id

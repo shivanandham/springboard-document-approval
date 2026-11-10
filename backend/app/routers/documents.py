@@ -20,7 +20,7 @@ router = APIRouter(
 )
 
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
-Description = Annotated[str | None, StringConstraints(strip_whitespace=True)]
+Description = Annotated[str, StringConstraints(strip_whitespace=True, max_length=5000)] | None
 
 
 @router.post(
