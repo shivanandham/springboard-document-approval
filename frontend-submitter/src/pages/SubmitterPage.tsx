@@ -18,8 +18,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
-const ACCEPTED = ['.pdf', '.docx', '.png', '.jpg', '.jpeg', '.txt']
+const ACCEPT = {
+  'application/pdf': ['.pdf'],
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+  'image/png': ['.png'],
+  'image/jpeg': ['.jpg', '.jpeg'],
+  'text/plain': ['.txt'],
+}
+const ACCEPTED = Object.values(ACCEPT).flat()
 const MAX_BYTES = 10 * 1024 * 1024
+const REJECTED: Record<string, string> = { 'file-too-large': 'File is larger than 10 MB', 'file-invalid-type': 'Unsupported file type' }
 
 const schema = z.object({
   title: z.string().trim().min(1, 'Title is required').max(200, 'Title must be at most 200 characters'),
@@ -48,13 +56,29 @@ function UploadedCheck({ onDone }: { onDone: () => void }) {
   )
 }
 
-function DropZone({ control, uploading, uploaded, onUploadedShown }: { control: Control<Values>; uploading: boolean; uploaded: boolean; onUploadedShown: () => void }) {
-  const { field, fieldState } = useController({ control, name: 'file' })
+type DropZoneProps = {
+  control: Control<Values>
+  uploading: boolean
+  invalid: boolean
+  uploaded: boolean
+  onUploadedShown: () => void
+  /** Called with a message when a picked file is refused, and with undefined when one is accepted. */
+  onReject: (message?: string) => void
+}
+
+function DropZone({ control, uploading, invalid, uploaded, onUploadedShown, onReject }: DropZoneProps) {
+  const { field } = useController({ control, name: 'file' })
   const file = field.value as File | undefined
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    accept: ACCEPT,
+    maxSize: MAX_BYTES,
     multiple: false,
     disabled: uploading,
-    onDrop: (accepted, rejected) => field.onChange(accepted[0] ?? rejected[0]?.file),
+    onDrop: (accepted, rejected) => {
+      field.onChange(accepted[0])
+      const code = rejected[0]?.errors[0]?.code
+      onReject(code ? (REJECTED[code] ?? 'Choose a single PDF, DOCX, PNG, JPG or TXT file') : undefined)
+    },
   })
 
   return (
@@ -67,7 +91,7 @@ function DropZone({ control, uploading, uploaded, onUploadedShown }: { control: 
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: '100%' }}
             transition={{ duration: 0.25, ease: 'easeOut' }}
-            className={cn('relative flex h-full min-h-40 items-center gap-3 overflow-hidden rounded-xl border bg-card p-4', fieldState.invalid && 'border-destructive/60')}
+            className={cn('relative flex h-full min-h-40 items-center gap-3 overflow-hidden rounded-xl border bg-card p-4', invalid && 'border-destructive/60')}
           >
             <FileIcon contentType={file.type} className="size-10" />
             <div className="grid min-w-0 flex-1 gap-0.5">
@@ -92,10 +116,10 @@ function DropZone({ control, uploading, uploaded, onUploadedShown }: { control: 
             className={cn(
               'flex h-full min-h-40 cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-input bg-muted/40 p-6 text-center transition-colors outline-none hover:border-primary/50 hover:bg-primary/[0.03] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
               isDragActive && 'border-primary bg-primary/5',
-              fieldState.invalid && 'border-destructive/60',
+              invalid && 'border-destructive/60',
             )}
           >
-            <input {...getInputProps({ id: 'file', accept: ACCEPTED.join(','), 'aria-invalid': fieldState.invalid })} />
+            <input {...getInputProps({ id: 'file', 'aria-invalid': invalid })} />
             <span className="grid size-10 place-items-center rounded-full bg-card shadow-xs ring-1 ring-foreground/10">
               {uploaded ? <UploadedCheck onDone={onUploadedShown} /> : <UploadCloud className="size-5 text-muted-foreground" />}
             </span>
@@ -165,6 +189,7 @@ export default function SubmitterPage() {
   const [page, setPage] = useState(0)
   const [selected, setSelected] = useState<Document | null>(null)
   const [uploaded, setUploaded] = useState(false)
+  const [rejectedPick, setRejectedPick] = useState<string>()
   const documents = useQuery({ queryKey: ['documents', 'mine', page], queryFn: () => api.listDocuments(page), placeholderData: keepPreviousData })
   const { register, control, handleSubmit, reset, setError, formState } = useForm<Values, unknown, z.output<typeof schema>>({
     resolver: zodResolver(schema),
@@ -189,9 +214,11 @@ export default function SubmitterPage() {
     },
     onError: (error) => {
       toast.error(error.message)
-      if (error instanceof ApiError)
-        for (const [field, message] of Object.entries(error.fields ?? {}))
-          if (field in schema.shape) setError(field as keyof typeof schema.shape, { message: String(message) })
+      if (!(error instanceof ApiError)) return
+      for (const [field, message] of Object.entries(error.fields ?? {}))
+        if (field in schema.shape) setError(field as keyof typeof schema.shape, { message: String(message) })
+      // The server is the final word on size and type; show its message on the file field.
+      if (error.status === 413 || error.status === 415) setError('file', { message: error.message })
     },
   })
 
@@ -225,8 +252,8 @@ export default function SubmitterPage() {
             </div>
             <div className="grid grid-rows-[auto_1fr_auto] gap-2">
               <Label htmlFor="file">File</Label>
-              <DropZone control={control} uploading={submit.isPending} uploaded={uploaded} onUploadedShown={() => setUploaded(false)} />
-              {errors.file && <p className="text-sm text-destructive">{errors.file.message}</p>}
+              <DropZone control={control} uploading={submit.isPending} invalid={!!(rejectedPick ?? errors.file)} uploaded={uploaded} onUploadedShown={() => setUploaded(false)} onReject={setRejectedPick} />
+              {(rejectedPick ?? errors.file) && <p className="text-sm text-destructive">{rejectedPick ?? errors.file?.message}</p>}
             </div>
           </div>
           <div className="flex justify-end border-t px-5 py-3">
