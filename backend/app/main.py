@@ -5,11 +5,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+from starlette.exceptions import HTTPException
 
 from app.config import settings
 from app.db import SessionDep, engine
 from app.routers import auth, documents
 from app.schemas import AppError
+
+HTTP_CODES = {401: "UNAUTHENTICATED", 403: "FORBIDDEN", 404: "NOT_FOUND", 409: "CONFLICT"}
 
 
 @asynccontextmanager
@@ -40,6 +43,14 @@ def create_app() -> FastAPI:
     async def validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
         fields = {str(e["loc"][-1]): e["msg"] for e in exc.errors() if e["loc"]}
         return _error(400, "VALIDATION_ERROR", "Invalid request", fields)
+
+    @app.exception_handler(HTTPException)
+    async def http_error(_: Request, exc: HTTPException) -> JSONResponse:
+        return _error(exc.status_code, HTTP_CODES.get(exc.status_code, "HTTP_ERROR"), exc.detail)
+
+    @app.exception_handler(Exception)
+    async def unhandled_error(_: Request, __: Exception) -> JSONResponse:
+        return _error(500, "INTERNAL_ERROR", "Something went wrong")
 
     @app.get("/api/health", summary="Health check (includes the database)", tags=["health"])
     async def health(session: SessionDep) -> dict[str, str]:
