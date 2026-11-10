@@ -1,5 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Loader2 } from 'lucide-react'
+import { motion } from 'motion/react'
 import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { Navigate } from 'react-router'
@@ -15,6 +16,16 @@ import { Label } from '@/components/ui/label'
 const schema = z.object({
   email: z.email('Enter a valid email'),
   password: z.string().min(1, 'Enter your password'),
+})
+
+const HEADLINE = ['Send it in.', 'See it signed off.']
+const WORKSPACE = 'Submitter workspace. Log in with your work email.'
+
+/** Headline lines rise and un-blur in sequence, then the form follows. */
+const reveal = (delay: number) => ({
+  initial: { opacity: 0, y: '0.35em', filter: 'blur(4px)' },
+  animate: { opacity: 1, y: 0, filter: 'blur(0px)' },
+  transition: { duration: 0.7, delay, ease: [0.2, 0.7, 0.2, 1] as const },
 })
 
 export default function Login() {
@@ -56,44 +67,48 @@ export default function Login() {
   })
 
   return (
-    <main className="relative isolate flex min-h-svh items-center justify-center overflow-hidden p-4">
+    <main className="relative isolate flex min-h-svh flex-col overflow-hidden px-5 py-7 sm:px-[8vw] sm:py-10">
       <div
         aria-hidden
-        className="absolute inset-0 -z-10 bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)] mask-[radial-gradient(ellipse_60%_50%_at_50%_40%,black,transparent)] bg-size-[44px_44px]"
+        className="absolute inset-0 -z-10 bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)] mask-[radial-gradient(ellipse_60%_50%_at_45%_50%,black,transparent)] bg-size-[44px_44px]"
       />
       <div
         aria-hidden
-        className="absolute inset-0 -z-10 bg-[radial-gradient(50%_40%_at_50%_0%,color-mix(in_oklch,var(--primary)_16%,transparent),transparent)]"
+        className="absolute inset-0 -z-10 bg-[radial-gradient(50%_40%_at_25%_0%,color-mix(in_oklch,var(--primary)_16%,transparent),transparent)]"
       />
-      <div className="w-full max-w-sm animate-in rounded-2xl duration-500 ease-out fade-in zoom-in-90 border bg-card p-8 shadow-xl shadow-black/[0.04] dark:shadow-black/40">
-        <div className="mb-8 grid animate-in justify-items-center delay-100 duration-500 ease-out fill-mode-both fade-in slide-in-from-left-12 gap-5 text-center">
-          <Brand />
-          <div className="grid gap-1.5">
-            <h1 className="text-xl font-semibold tracking-tight">Welcome back</h1>
-            <p className="text-sm text-muted-foreground">Log in to your account to continue</p>
-          </div>
-        </div>
-        <form onSubmit={onSubmit} className="grid animate-in gap-4 delay-150 duration-500 ease-out fill-mode-both fade-in slide-in-from-left-12" noValidate>
+      <Brand />
+      <div className="mt-16 mb-auto max-w-4xl sm:my-auto">
+        <h1 className="text-[clamp(2.75rem,7.2vw,6rem)] leading-[0.98] font-[650] tracking-[-0.045em]">
+          {HEADLINE.map((line, i) => (
+            <motion.span key={line} className="block" {...reveal(i * 0.12)}>
+              {line}
+            </motion.span>
+          ))}
+        </h1>
+        <motion.form {...reveal(0.3)} onSubmit={onSubmit} className="mt-9 grid max-w-205 items-start gap-4 sm:mt-14 md:grid-cols-[1fr_1fr_auto] md:gap-3" noValidate>
           <div className="grid gap-2">
             <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" autoComplete="email" className="h-9" aria-invalid={!!errors.email} {...register('email')} />
+            <Input id="email" type="email" autoComplete="email" placeholder="you@company.com" className="h-11 bg-card shadow-sm" aria-invalid={!!errors.email} {...register('email')} />
             {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
           </div>
           <div className="grid gap-2">
             <Label htmlFor="password">Password</Label>
-            <Input id="password" type="password" autoComplete="current-password" className="h-9" aria-invalid={!!errors.password} {...register('password')} />
+            <Input id="password" type="password" autoComplete="current-password" className="h-11 bg-card shadow-sm" aria-invalid={!!errors.password} {...register('password')} />
             {errors.password && <p className="text-sm text-destructive">{errors.password.message}</p>}
           </div>
-          {errors.root && (
-            <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {errors.root.message}
-            </p>
-          )}
-          <Button type="submit" size="lg" className="mt-2 h-9 tabular-nums" disabled={isSubmitting || secondsLeft > 0}>
+          <Button type="submit" className="h-11 px-7 tabular-nums md:mt-5.5" disabled={isSubmitting || secondsLeft > 0}>
             {isSubmitting && <Loader2 className="animate-spin" />}
             {secondsLeft > 0 ? `Try again in ${secondsLeft}s` : 'Log in'}
           </Button>
-        </form>
+          {errors.root && (
+            <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive md:col-span-3">
+              {errors.root.message}
+            </p>
+          )}
+        </motion.form>
+        <motion.p {...reveal(0.3)} className="mt-3.5 text-sm text-muted-foreground">
+          {WORKSPACE}
+        </motion.p>
       </div>
     </main>
   )
