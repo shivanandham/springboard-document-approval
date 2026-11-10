@@ -1,3 +1,9 @@
+import json
+import logging
+import re
+import sys
+import time
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -5,6 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -17,6 +24,69 @@ from app.schemas import AppError
 HTTP_CODES = {401: "UNAUTHENTICATED", 403: "FORBIDDEN", 404: "NOT_FOUND", 409: "CONFLICT"}
 MULTIPART_OVERHEAD = 1024 * 1024
 UPLOAD_ROUTE = "POST /api/documents"
+REQUEST_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
+LOG_FIELDS = ("method", "path", "status", "duration_ms", "request_id", "user_id")
+
+logger = logging.getLogger("docflow")
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        entry = {
+            "time": self.formatTime(record),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        entry |= {f: getattr(record, f) for f in LOG_FIELDS if hasattr(record, f)}
+        if record.exc_info:
+            entry["exc_info"] = self.formatException(record.exc_info)
+        return json.dumps(entry, default=str)
+
+
+def configure_logging() -> None:
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(JsonFormatter())
+    logging.basicConfig(level=settings.log_level.upper(), handlers=[handler], force=True)
+
+
+class RequestContext:
+    """Assigns a request id (echoed as X-Request-ID) and logs one line per request.
+    Only method, path, status, timing and ids are logged: never headers, bodies or tokens."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        incoming = Headers(scope=scope).get("x-request-id", "")
+        request_id = incoming if REQUEST_ID.fullmatch(incoming) else uuid.uuid4().hex
+        state = scope.setdefault("state", {})
+        state["request_id"] = request_id
+        status, start = 500, time.perf_counter()
+
+        async def send_with_id(message: Message) -> None:
+            nonlocal status
+            if message["type"] == "http.response.start":
+                status = message["status"]
+                MutableHeaders(scope=message).append("X-Request-ID", request_id)
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_with_id)
+        finally:
+            logger.info(
+                "request",
+                extra={
+                    "method": scope["method"],
+                    "path": scope["path"],
+                    "status": status,
+                    "duration_ms": round((time.perf_counter() - start) * 1000, 1),
+                    "request_id": request_id,
+                    "user_id": state.get("user_id"),
+                },
+            )
 
 
 class UploadSizeLimit:
@@ -56,16 +126,18 @@ async def lifespan(_: FastAPI):
 
 
 def create_app() -> FastAPI:
+    configure_logging()
     app = FastAPI(title="DocFlow API", lifespan=lifespan)
     app.add_middleware(UploadSizeLimit)
-    app.add_middleware(  # added last so it wraps everything, including early 413s
+    app.add_middleware(  # wraps the upload check so early 413s get CORS headers
         CORSMiddleware,
         allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=["Content-Disposition"],
+        expose_headers=["Content-Disposition", "X-Request-ID"],
     )
+    app.add_middleware(RequestContext)
 
     app.include_router(auth.router)
     app.include_router(documents.router)
@@ -87,8 +159,12 @@ def create_app() -> FastAPI:
         return _error(exc.status_code, HTTP_CODES.get(exc.status_code, "HTTP_ERROR"), exc.detail)
 
     @app.exception_handler(Exception)
-    async def unhandled_error(_: Request, __: Exception) -> JSONResponse:
-        return _error(500, "INTERNAL_ERROR", "Something went wrong")
+    async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
+        # Runs outside the middleware stack, so it sets X-Request-ID itself.
+        request_id = request.state.request_id
+        logger.error("unhandled error", exc_info=exc, extra={"request_id": request_id})
+        message = f"Something went wrong. Reference: {request_id}"
+        return _error(500, "INTERNAL_ERROR", message, headers={"X-Request-ID": request_id})
 
     @app.get("/api/health", summary="Health check (includes the database)", tags=["health"])
     async def health(session: SessionDep) -> dict[str, str]:

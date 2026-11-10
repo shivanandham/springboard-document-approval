@@ -42,6 +42,7 @@ async def login(
     Limited to 5 attempts a minute per client IP and email, and 20 per client IP."""
     security.check_login_rate(request.client.host if request.client else "", form.username)
     user = await security.authenticate(session, form.username, form.password)
+    request.state.user_id = str(user.id)
     refresh_token, _ = await security.issue_refresh_token(session, user.id)
     await session.commit()
     return _tokens(response, user, refresh_token)

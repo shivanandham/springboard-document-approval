@@ -11,7 +11,7 @@ from typing import Annotated
 import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -159,7 +159,7 @@ async def revoke_refresh_token(session: AsyncSession, token: str) -> None:
 
 
 async def get_current_user(
-    session: SessionDep, token: Annotated[str | None, Depends(_bearer)]
+    request: Request, session: SessionDep, token: Annotated[str | None, Depends(_bearer)]
 ) -> User:
     if not token:
         raise unauthenticated()
@@ -174,6 +174,7 @@ async def get_current_user(
     user = await session.get(User, user_id)
     if user is None or not user.is_active:
         raise unauthenticated()
+    request.state.user_id = str(user.id)  # for the request log line
     return user
 
 

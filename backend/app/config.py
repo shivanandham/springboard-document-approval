@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     max_upload_mb: int = 10
     storage_dir: Path = Path("./storage")
     cors_origins: str = ""
+    log_level: str = "INFO"
     seed_submitter_password: str
     seed_reviewer_password: str
 
