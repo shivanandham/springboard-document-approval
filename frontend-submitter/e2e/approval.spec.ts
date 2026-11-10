@@ -21,6 +21,7 @@ test('submitter sees a reviewer rejection with its comment', async ({ page }) =>
   const comment = 'Receipts are missing for the hotel stay.'
 
   await login(page, SUBMITTER_APP, 'sam.submitter@docflow.dev', 'submitter123')
+  await page.getByRole('button', { name: 'New document' }).click()
   await page.getByLabel('Title').fill(title)
   await page.getByLabel('File').setInputFiles({ name: 'report.txt', mimeType: 'text/plain', buffer: Buffer.from('Q3 expenses') })
   await page.getByRole('button', { name: 'Submit' }).click()
@@ -29,7 +30,10 @@ test('submitter sees a reviewer rejection with its comment', async ({ page }) =>
   await logout(page)
 
   await login(page, REVIEWER_APP, 'riya.reviewer@docflow.dev', 'reviewer123')
-  await page.getByRole('row').filter({ hasText: title }).getByRole('button', { name: 'Reject' }).click()
+  // At 1280px the document opens in the docked pane, whose header holds Reject.
+  await page.getByRole('row').filter({ hasText: title }).click()
+  await expect(page.getByRole('heading', { name: title })).toBeVisible()
+  await page.getByRole('button', { name: 'Reject', exact: true }).click()
   const dialog = page.getByRole('dialog')
   await dialog.getByLabel('Comment').fill(comment)
   await dialog.getByRole('button', { name: 'Reject' }).click()

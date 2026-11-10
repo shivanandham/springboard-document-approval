@@ -49,9 +49,9 @@ const queryClient = new QueryClient({
 
 function Layout() {
   return (
-    <div className="min-h-svh">
+    <div className="min-h-svh xl:flex xl:h-svh xl:flex-col">
       <Header />
-      <main className="mx-auto grid max-w-5xl gap-6 px-4 py-8 sm:px-6 sm:py-10">
+      <main className="grid gap-5 px-4 py-6 sm:px-6 xl:min-h-0 xl:flex-1 xl:grid-rows-[auto_minmax(0,1fr)]">
         <Outlet />
       </main>
     </div>

@@ -2,7 +2,7 @@ import { cn } from 'cn'
 import { ChevronsUpDown, FileCheck, FileImage, FileText, FileType, LogOut, RotateCw, TriangleAlert, type LucideIcon } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useTheme } from 'next-themes'
-import type { ReactNode } from 'react'
+import { useSyncExternalStore, type ReactNode } from 'react'
 import { PAGE_SIZE, type DocumentStatus } from '@/api'
 import { useAuth } from '@/auth'
 import { AnimatedThemeToggler } from '@/components/ui/animated-theme-toggler'
@@ -19,6 +19,15 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { TableCell, TableRow } from '@/components/ui/table'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+
+const WIDE = window.matchMedia('(min-width: 1280px)')
+const onWideChange = (callback: () => void) => {
+  WIDE.addEventListener('change', callback)
+  return () => WIDE.removeEventListener('change', callback)
+}
+
+/** True at 1280px and up, where the document pane docks beside the list instead of opening as a sheet. */
+export const useWide = () => useSyncExternalStore(onWideChange, () => WIDE.matches)
 
 export function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
@@ -178,7 +187,7 @@ function UserMenu() {
 export function Header() {
   return (
     <header className="sticky top-0 z-40 border-b bg-card/80 backdrop-blur supports-backdrop-filter:bg-card/70">
-      <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 sm:px-6">
+      <div className="flex h-14 items-center justify-between px-4 sm:px-6">
         <Brand />
         <div className="flex items-center gap-1">
           <ThemeToggle />

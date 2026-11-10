@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { cn } from 'cn'
-import { FileStack, Loader2, UploadCloud, X } from 'lucide-react'
+import { FileStack, Loader2, Plus, UploadCloud, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useState } from 'react'
 import { useDropzone } from 'react-dropzone'
@@ -9,8 +9,8 @@ import { useController, useForm, type Control } from 'react-hook-form'
 import { toast } from 'sonner'
 import { z } from 'zod'
 import { api, ApiError, PAGE_SIZE, type Document } from '@/api'
-import { DocumentPanel } from '@/components/DocumentPanel'
-import { enter, FileIcon, formatSize, PageHeading, Pagination, RelativeTime, rowMotion, StatusPill, TablePlaceholder } from '@/components/common'
+import { DocumentView, SplitView } from '@/components/DocumentPanel'
+import { enter, FileIcon, formatSize, PageHeading, Pagination, RelativeTime, rowMotion, StatusPill, TablePlaceholder, useWide } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -40,33 +40,15 @@ const schema = z.object({
 
 type Values = z.input<typeof schema>
 
-/** A stroke-drawn check that plays once after a successful upload. */
-function UploadedCheck({ onDone }: { onDone: () => void }) {
-  return (
-    <motion.svg viewBox="0 0 24 24" className="size-5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" strokeWidth={2.25} strokeLinecap="round" strokeLinejoin="round">
-      <motion.circle cx="12" cy="12" r="9" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.45, ease: 'easeOut' }} />
-      <motion.path
-        d="m8.5 12.5 2.5 2.5 4.5-5"
-        initial={{ pathLength: 0, opacity: 1 }}
-        animate={{ pathLength: 1, opacity: [1, 1, 0] }}
-        transition={{ pathLength: { delay: 0.35, duration: 0.3 }, opacity: { delay: 0.65, duration: 1.1, times: [0, 0.7, 1] } }}
-        onAnimationComplete={onDone}
-      />
-    </motion.svg>
-  )
-}
-
 type DropZoneProps = {
   control: Control<Values>
   uploading: boolean
   invalid: boolean
-  uploaded: boolean
-  onUploadedShown: () => void
   /** Called with a message when a picked file is refused, and with undefined when one is accepted. */
   onReject: (message?: string) => void
 }
 
-function DropZone({ control, uploading, invalid, uploaded, onUploadedShown, onReject }: DropZoneProps) {
+function DropZone({ control, uploading, invalid, onReject }: DropZoneProps) {
   const { field } = useController({ control, name: 'file' })
   const file = field.value as File | undefined
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -121,7 +103,7 @@ function DropZone({ control, uploading, invalid, uploaded, onUploadedShown, onRe
           >
             <input {...getInputProps({ id: 'file', 'aria-invalid': invalid })} />
             <span className="grid size-10 place-items-center rounded-full bg-card shadow-xs ring-1 ring-foreground/10">
-              {uploaded ? <UploadedCheck onDone={onUploadedShown} /> : <UploadCloud className="size-5 text-muted-foreground" />}
+              <UploadCloud className="size-5 text-muted-foreground" />
             </span>
             <div className="grid gap-1">
               <p className="text-sm">
@@ -142,7 +124,7 @@ function DropZone({ control, uploading, invalid, uploaded, onUploadedShown, onRe
   )
 }
 
-function DocumentRow({ doc, index, onOpen }: { doc: Document; index: number; onOpen: () => void }) {
+function DocumentRow({ doc, index, selected, onOpen }: { doc: Document; index: number; selected: boolean; onOpen: () => void }) {
   const pill = <StatusPill status={doc.status} />
   return (
     <motion.tr
@@ -150,23 +132,20 @@ function DocumentRow({ doc, index, onOpen }: { doc: Document; index: number; onO
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={(event) => event.key === 'Enter' && onOpen()}
-      className="cursor-pointer border-b transition-colors outline-none hover:bg-muted/50 focus-visible:bg-muted/50"
+      data-selected={selected || undefined}
+      className="cursor-pointer border-b transition-colors outline-none hover:bg-muted/50 focus-visible:bg-muted/50 data-selected:bg-primary/5 data-selected:shadow-[inset_3px_0_0_var(--primary)]"
     >
       <TableCell className="px-4 py-3">
         <div className="flex items-center gap-3">
           <FileIcon contentType={doc.file?.content_type} />
           <div className="grid min-w-0 gap-0.5">
-            <span className="max-w-[22rem] truncate font-medium">{doc.title}</span>
-            {doc.file && (
-              <span className="max-w-[22rem] truncate text-xs text-muted-foreground">
-                {doc.file.original_name} · {formatSize(doc.file.size_bytes)}
-              </span>
-            )}
+            <span className="truncate font-medium">{doc.title}</span>
+            <span className="truncate text-xs text-muted-foreground">
+              {doc.file && `${doc.file.original_name} · ${formatSize(doc.file.size_bytes)} · `}
+              <RelativeTime iso={doc.created_at} />
+            </span>
           </div>
         </div>
-      </TableCell>
-      <TableCell className="hidden px-4 py-3 text-muted-foreground sm:table-cell">
-        <RelativeTime iso={doc.created_at} />
       </TableCell>
       <TableCell className="px-4 py-3 text-right">
         {doc.status === 'rejected' && doc.decision_comment ? (
@@ -184,13 +163,9 @@ function DocumentRow({ doc, index, onOpen }: { doc: Document; index: number; onO
   )
 }
 
-export default function SubmitterPage() {
+function NewDocumentForm({ onCreated, onCancel }: { onCreated: (doc: Document) => void; onCancel: () => void }) {
   const queryClient = useQueryClient()
-  const [page, setPage] = useState(0)
-  const [selected, setSelected] = useState<Document | null>(null)
-  const [uploaded, setUploaded] = useState(false)
   const [rejectedPick, setRejectedPick] = useState<string>()
-  const documents = useQuery({ queryKey: ['documents', 'mine', page], queryFn: () => api.listDocuments(page), placeholderData: keepPreviousData })
   const { register, control, handleSubmit, reset, setError, formState } = useForm<Values, unknown, z.output<typeof schema>>({
     resolver: zodResolver(schema),
     defaultValues: { title: '', description: '' },
@@ -205,12 +180,10 @@ export default function SubmitterPage() {
       body.append('file', values.file)
       return api.createDocument(body)
     },
-    onSuccess: () => {
+    onSuccess: (doc) => {
       toast.success('Document submitted')
-      reset()
-      setUploaded(true)
-      setPage(0)
       queryClient.invalidateQueries({ queryKey: ['documents'] })
+      onCreated(doc)
     },
     onError: (error) => {
       toast.error(error.message)
@@ -222,71 +195,128 @@ export default function SubmitterPage() {
     },
   })
 
+  return (
+    <form onSubmit={handleSubmit((values) => submit.mutate(values))} className="@container flex h-full min-h-0 flex-col" noValidate>
+      <header data-slot="pane-header" className="grid gap-1 border-b p-5">
+        <h2 className="text-base font-semibold tracking-tight">New document</h2>
+        <p className="text-xs text-muted-foreground">A reviewer sees it as soon as you submit.</p>
+      </header>
+      <div className="flex-1 overflow-y-auto">
+        <div className="grid gap-5 p-5 @xl:grid-cols-2">
+          <div className="grid content-start gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="title">Title</Label>
+              <Input id="title" className="h-9" aria-invalid={!!errors.title} {...register('title')} />
+              {errors.title && <p className="text-sm text-destructive">{errors.title.message}</p>}
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="description">
+                Description <span className="font-normal text-muted-foreground">(optional)</span>
+              </Label>
+              <Textarea id="description" rows={5} className="min-h-28 resize-none" {...register('description')} />
+            </div>
+          </div>
+          <div className="grid grid-rows-[auto_1fr_auto] gap-2">
+            <Label htmlFor="file">File</Label>
+            <DropZone control={control} uploading={submit.isPending} invalid={!!(rejectedPick ?? errors.file)} onReject={setRejectedPick} />
+            {(rejectedPick ?? errors.file) && <p className="text-sm text-destructive">{rejectedPick ?? errors.file?.message}</p>}
+          </div>
+        </div>
+      </div>
+      <div className="flex justify-end gap-2 border-t px-5 py-3">
+        <Button
+          type="button"
+          variant="outline"
+          className="h-9 px-4"
+          disabled={submit.isPending}
+          onClick={() => {
+            reset()
+            setRejectedPick(undefined)
+            onCancel()
+          }}
+        >
+          Cancel
+        </Button>
+        <Button type="submit" className="h-9 px-4" disabled={submit.isPending}>
+          {submit.isPending && <Loader2 className="animate-spin" />}
+          Submit
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+export default function SubmitterPage() {
+  const wide = useWide()
+  const [page, setPage] = useState(0)
+  // No selection means the pane holds the new-document form.
+  const [selected, setSelected] = useState<Document | null>(null)
+  const [open, setOpen] = useState(false)
+  const documents = useQuery({ queryKey: ['documents', 'mine', page], queryFn: () => api.listDocuments(page), placeholderData: keepPreviousData })
+
   const items = documents.data?.items ?? []
   const total = documents.data?.total ?? 0
   const lastPage = Math.max(0, Math.ceil(total / PAGE_SIZE) - 1)
   if (page > lastPage) setPage(lastPage)
 
+  const show = (doc: Document | null) => {
+    setSelected(doc)
+    setOpen(true)
+  }
+
   return (
     <>
-      <PageHeading title="My documents" subtitle="Submit documents for review and track their status." />
+      <PageHeading title="My documents" subtitle="Submit documents for review and track their status.">
+        <Button className="h-9 px-4" onClick={() => show(null)}>
+          <Plus />
+          New document
+        </Button>
+      </PageHeading>
 
-      <motion.section {...enter(0.15)} className="rounded-xl border bg-card shadow-xs">
-        <div className="border-b px-5 py-4">
-          <h2 className="text-sm font-semibold">New document</h2>
-        </div>
-        <form onSubmit={handleSubmit((values) => submit.mutate(values))} noValidate>
-          <div className="grid gap-5 p-5 md:grid-cols-2">
-            <div className="grid content-start gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="title">Title</Label>
-                <Input id="title" className="h-9" aria-invalid={!!errors.title} {...register('title')} />
-                {errors.title && <p className="text-sm text-destructive">{errors.title.message}</p>}
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="description">
-                  Description <span className="font-normal text-muted-foreground">(optional)</span>
-                </Label>
-                <Textarea id="description" rows={4} className="min-h-24 resize-none" {...register('description')} />
-              </div>
+      <SplitView
+        title={selected?.title ?? 'New document'}
+        open={open}
+        onClose={() => setOpen(false)}
+        detail={
+          selected ? (
+            <DocumentView key={selected.id} doc={selected} />
+          ) : (
+            <NewDocumentForm
+              onCreated={(doc) => {
+                setPage(0)
+                show(doc)
+              }}
+              onCancel={() => {
+                setOpen(false)
+                if (wide && items[0]) setSelected(items[0])
+              }}
+            />
+          )
+        }
+        list={
+          <motion.section {...enter(0.15)} className="flex flex-col overflow-hidden rounded-xl border bg-card shadow-xs xl:h-full">
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <Table className="table-fixed">
+                <TableHeader className="bg-muted/50">
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="h-10 px-4 text-xs text-muted-foreground">Document</TableHead>
+                    <TableHead className="h-10 w-32 px-4 text-right text-xs text-muted-foreground">Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {items.length === 0 && <TablePlaceholder columns={2} loading={documents.isPending} icon={FileStack} message="No documents yet. Your submissions will appear here." />}
+                  <AnimatePresence>
+                    {items.map((doc, index) => (
+                      <DocumentRow key={doc.id} doc={doc} index={index} selected={wide && selected?.id === doc.id} onOpen={() => show(doc)} />
+                    ))}
+                  </AnimatePresence>
+                </TableBody>
+              </Table>
             </div>
-            <div className="grid grid-rows-[auto_1fr_auto] gap-2">
-              <Label htmlFor="file">File</Label>
-              <DropZone control={control} uploading={submit.isPending} invalid={!!(rejectedPick ?? errors.file)} uploaded={uploaded} onUploadedShown={() => setUploaded(false)} onReject={setRejectedPick} />
-              {(rejectedPick ?? errors.file) && <p className="text-sm text-destructive">{rejectedPick ?? errors.file?.message}</p>}
-            </div>
-          </div>
-          <div className="flex justify-end border-t px-5 py-3">
-            <Button type="submit" className="h-9 px-4" disabled={submit.isPending}>
-              {submit.isPending && <Loader2 className="animate-spin" />}
-              Submit
-            </Button>
-          </div>
-        </form>
-      </motion.section>
-
-      <motion.section {...enter(0.2)} className="overflow-hidden rounded-xl border bg-card shadow-xs">
-        <Table>
-          <TableHeader className="bg-muted/50">
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="h-10 px-4 text-xs text-muted-foreground">Document</TableHead>
-              <TableHead className="hidden h-10 px-4 text-xs text-muted-foreground sm:table-cell">Submitted</TableHead>
-              <TableHead className="h-10 px-4 text-right text-xs text-muted-foreground">Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.length === 0 && <TablePlaceholder columns={3} loading={documents.isPending} icon={FileStack} message="No documents yet. Your submissions will appear here." />}
-            <AnimatePresence>
-              {items.map((doc, index) => (
-                <DocumentRow key={doc.id} doc={doc} index={index} onOpen={() => setSelected(doc)} />
-              ))}
-            </AnimatePresence>
-          </TableBody>
-        </Table>
-        <Pagination page={page} total={total} onChange={setPage} />
-      </motion.section>
-
-      <DocumentPanel doc={selected} onClose={() => setSelected(null)} />
+            <Pagination page={page} total={total} onChange={setPage} />
+          </motion.section>
+        }
+      />
     </>
   )
 }
