@@ -93,8 +93,9 @@ async def test_submitter_cannot_decide(decide, make_user, doc):
     assert_error(await decide(other, doc.id), 403, "FORBIDDEN")
 
 
-async def test_unknown_document(decide, riya):
-    assert_error(await decide(riya, uuid.uuid4()), 404, "NOT_FOUND")
+@pytest.mark.parametrize("document_id", [uuid.uuid4(), "not-a-uuid"])
+async def test_unknown_document(decide, riya, document_id):
+    assert_error(await decide(riya, document_id), 404, "NOT_FOUND")
 
 
 @pytest.mark.parametrize(

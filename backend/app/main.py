@@ -41,6 +41,9 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # A malformed path id can't match anything, so treat it like an unknown one.
+        if any(e["loc"][:1] == ("path",) for e in exc.errors()):
+            return _error(404, "NOT_FOUND", "Not found")
         fields = {str(e["loc"][-1]): e["msg"] for e in exc.errors() if e["loc"]}
         return _error(400, "VALIDATION_ERROR", "Invalid request", fields)
 

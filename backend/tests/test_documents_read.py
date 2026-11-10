@@ -139,10 +139,11 @@ async def test_unknown_document_is_404(client, auth, users):
     assert resp.status_code == 404
 
 
-async def test_malformed_id_is_400(client, auth, users):
-    resp = await client.get("/api/documents/not-a-uuid", headers=auth(users["riya"]))
-    assert resp.status_code == 400
-    assert "document_id" in resp.json()["error"]["fields"]
+@pytest.mark.parametrize("suffix", ["", "/file"])
+async def test_malformed_id_is_404(client, auth, users, suffix):
+    resp = await client.get(f"/api/documents/not-a-uuid{suffix}", headers=auth(users["riya"]))
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "NOT_FOUND"
 
 
 async def test_download_follows_ownership(client, auth, users, upload):
