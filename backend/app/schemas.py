@@ -3,14 +3,24 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from starlette.exceptions import HTTPException
 
 from app.models import DocumentStatus, EventType
 
 
-class AppError(Exception):
+class AppError(HTTPException):
+    """An expected error rendered in the API's error shape. Subclassing HTTPException lets it
+    escape FastAPI's body parsing unchanged, e.g. when raised from an upload size check."""
+
     def __init__(
-        self, status: int, code: str, message: str, fields: dict[str, str] | None = None
+        self,
+        status: int,
+        code: str,
+        message: str,
+        fields: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
+        super().__init__(status, message, headers)
         self.status, self.code, self.message, self.fields = status, code, message, fields or {}
 
 

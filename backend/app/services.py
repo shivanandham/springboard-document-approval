@@ -47,6 +47,15 @@ TRANSITIONS = {
 Decision = Literal["approve", "reject"]
 
 
+def file_too_large() -> AppError:
+    return AppError(
+        413,
+        "FILE_TOO_LARGE",
+        f"Files can be at most {settings.max_upload_mb} MB",
+        {"file": "File too large"},
+    )
+
+
 def not_found(what: str = "Document") -> AppError:
     return AppError(404, "NOT_FOUND", f"{what} not found")
 
@@ -73,12 +82,7 @@ async def create_document(
         while chunk := await upload.read(CHUNK_SIZE):
             size += len(chunk)
             if size > limit:
-                raise AppError(
-                    413,
-                    "FILE_TOO_LARGE",
-                    f"Files can be at most {settings.max_upload_mb} MB",
-                    {"file": "File too large"},
-                )
+                raise file_too_large()
             digest.update(chunk)
             yield chunk
 

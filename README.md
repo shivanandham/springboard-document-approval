@@ -170,7 +170,7 @@ The database enforces the rules too, so a bug or a manual SQL session can't crea
 
 Concurrency: `decide()` takes `SELECT … FOR UPDATE` on the row and checks the client's `version`. Two reviewers acting at once get one 200 and one 409.
 
-Uploads are streamed to disk in 1 MB chunks and hashed as they're written. Upload aborts with a 413 as soon as the file passes the limit (10 MB by default, `MAX_UPLOAD_MB`). The file goes to a temporary key, the rows are committed, and then the file moves to its final key. A failure at any step leaves nothing behind.
+Uploads are streamed to disk in 1 MB chunks and hashed as they're written. Upload aborts with a 413 as soon as the file passes the limit (10 MB by default, `MAX_UPLOAD_MB`). Before that, a small ASGI middleware refuses an upload whose `Content-Length` is over the limit plus 1 MB of multipart overhead without reading the body, and cuts off a chunked body once it passes the same cap. The file goes to a temporary key, the rows are committed, and then the file moves to its final key. A failure at any step leaves nothing behind.
 
 ## Major decisions and trade-offs
 

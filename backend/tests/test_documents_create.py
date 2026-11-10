@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from app import services
 from app.config import settings
+from app.main import app
 from app.models import DocumentEvent, DocumentFile
 
 
@@ -124,6 +125,72 @@ async def test_create_file_too_large(upload, sam, monkeypatch):
 async def test_create_file_at_limit(upload, sam, monkeypatch):
     monkeypatch.setattr(settings, "max_upload_mb", 1)
     assert (await upload(sam, content=b"x" * 1024 * 1024)).status_code == 201
+
+
+async def test_declared_oversize_upload_rejected_before_body_is_read(monkeypatch):
+    monkeypatch.setattr(settings, "max_upload_mb", 1)
+    sent = []
+
+    async def receive():
+        raise AssertionError("the body must not be read")
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/documents",
+        "raw_path": b"/api/documents",
+        "root_path": "",
+        "query_string": b"",
+        "headers": [(b"content-length", b"999999999")],
+        "client": ("127.0.0.1", 1),
+        "server": ("test", 80),
+    }
+    await app(scope, receive, send)
+    assert sent[0]["status"] == 413
+    assert b'"FILE_TOO_LARGE"' in sent[1]["body"]
+
+
+def chunked_multipart(file_size: int, sent: list[int] | None = None, chunk: int = 256 * 1024):
+    boundary = "docflow-boundary"
+    sent = sent if sent is not None else []
+
+    async def body():
+        yield (
+            f'--{boundary}\r\nContent-Disposition: form-data; name="title"\r\n\r\nBig\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="big.txt"'
+            "\r\nContent-Type: text/plain\r\n\r\n"
+        ).encode()
+        for start in range(0, file_size, chunk):
+            sent.append(min(chunk, file_size - start))
+            yield b"x" * sent[-1]
+        yield f"\r\n--{boundary}--\r\n".encode()
+
+    return {"content-type": f"multipart/form-data; boundary={boundary}"}, body()
+
+
+async def test_chunked_upload_under_limit(client, auth, sam):
+    headers, body = chunked_multipart(1000)
+    resp = await client.post("/api/documents", headers={**auth(sam), **headers}, content=body)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["file"]["size_bytes"] == 1000
+
+
+async def test_chunked_upload_over_cap_is_cut_off(client, auth, sam, monkeypatch):
+    monkeypatch.setattr(settings, "max_upload_mb", 1)
+    before = stored_files()
+    sent: list[int] = []
+    headers, body = chunked_multipart(8 * 1024 * 1024, sent)
+    resp = await client.post("/api/documents", headers={**auth(sam), **headers}, content=body)
+    assert "content-length" not in resp.request.headers
+    assert_error(resp, 413, "FILE_TOO_LARGE", "file")
+    assert sum(sent) < 3 * 1024 * 1024  # reading stopped just past the 2 MB cap
+    assert stored_files() == before
 
 
 @pytest.mark.parametrize("filename", ["malware.exe", "archive.zip", "noextension", "report.pdf.sh"])
