@@ -9,7 +9,7 @@ from pydantic import StringConstraints
 from app import services
 from app.db import SessionDep
 from app.models import DocumentStatus, User
-from app.schemas import DocumentDetail, DocumentOut, DocumentPage, ErrorOut
+from app.schemas import DecisionIn, DocumentDetail, DocumentOut, DocumentPage, ErrorOut
 from app.security import require_permission
 from app.storage import storage
 
@@ -89,4 +89,22 @@ async def download_file(
             "Content-Length": str(doc.file.size_bytes),
             "X-Content-Type-Options": "nosniff",
         },
+    )
+
+
+@router.post(
+    "/{document_id}/decision",
+    summary="Approve or reject a pending document",
+    responses={409: {"model": ErrorOut}},
+)
+async def decide(
+    session: SessionDep,
+    user: Annotated[User, require_permission("document:review")],
+    document_id: uuid.UUID,
+    body: DecisionIn,
+) -> DocumentOut:
+    """Rejecting needs a comment. `version` must match the document's current version,
+    otherwise the decision is refused with 409 so a stale screen can't overwrite a newer one."""
+    return await services.decide(
+        session, user, document_id, body.decision, body.comment, body.version
     )

@@ -1,6 +1,7 @@
 import hashlib
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import PurePath
 from typing import Literal
 
@@ -34,6 +35,16 @@ ALLOWED_TYPES = {
     ".jpeg": "image/jpeg",
     ".txt": "text/plain",
 }
+
+
+# The whole state machine: only pending documents can be decided, and only once.
+TRANSITIONS = {
+    DocumentStatus.pending: {
+        "approve": DocumentStatus.approved,
+        "reject": DocumentStatus.rejected,
+    },
+}
+Decision = Literal["approve", "reject"]
 
 
 def not_found(what: str = "Document") -> AppError:
@@ -150,6 +161,65 @@ async def get_document(
 ) -> Document:
     """Fetch a document the user may see. Others' documents are 404 so existence doesn't leak."""
     return await _load(session, doc_id, _visible(user, all_permission), events)
+
+
+def transition(status: DocumentStatus, decision: Decision) -> DocumentStatus:
+    target = TRANSITIONS.get(status, {}).get(decision)
+    if target is None:
+        raise AppError(409, "INVALID_TRANSITION", f"This document has already been {status.value}")
+    return target
+
+
+async def decide(
+    session: AsyncSession,
+    reviewer: User,
+    doc_id: uuid.UUID,
+    decision: Decision,
+    comment: str | None,
+    version: int,
+) -> Document:
+    """The only place a document's status changes. Locks the row, then checks the version."""
+    comment = (comment or "").strip() or None
+    if decision == "reject" and comment is None:
+        raise AppError(
+            400,
+            "VALIDATION_ERROR",
+            "A comment is required when rejecting a document",
+            {"comment": "Required when rejecting"},
+        )
+    doc = await session.scalar(
+        select(Document)
+        .where(Document.id == doc_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if doc is None:
+        raise not_found()
+    if doc.submitter_id == reviewer.id:
+        raise AppError(403, "FORBIDDEN", "You cannot decide on your own document")
+    target = transition(doc.status, decision)
+    if doc.version != version:
+        raise AppError(
+            409, "CONFLICT", "This document was changed by someone else. Reload and try again"
+        )
+
+    session.add(
+        DocumentEvent(
+            document_id=doc.id,
+            actor_id=reviewer.id,
+            event=EventType(target.value),
+            from_status=doc.status,
+            to_status=target,
+            comment=comment,
+        )
+    )
+    doc.status = target
+    doc.decided_by_id = reviewer.id
+    doc.decided_at = datetime.now(UTC)
+    doc.decision_comment = comment
+    doc.version += 1
+    await session.commit()
+    return await _load(session, doc.id)
 
 
 async def reseed_users() -> None:
