@@ -1,5 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Loader2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { Navigate } from 'react-router'
 import { toast } from 'sonner'
@@ -18,8 +19,24 @@ const schema = z.object({
 
 export default function Login() {
   const { user, login } = useAuth()
-  const { register, handleSubmit, setError, formState } = useForm({ resolver: zodResolver(schema) })
+  const { register, handleSubmit, setError, clearErrors, formState } = useForm({ resolver: zodResolver(schema) })
   const { errors, isSubmitting } = formState
+  // Rate limiting: the button stays disabled until Retry-After has passed, with a live countdown.
+  const [lock, setLock] = useState<{ seconds: number } | null>(null)
+  const [secondsLeft, setSecondsLeft] = useState(0)
+
+  useEffect(() => {
+    if (!lock) return
+    const deadline = Date.now() + lock.seconds * 1000
+    const timer = setInterval(() => {
+      const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+      setSecondsLeft(left)
+      if (left > 0) return
+      clearInterval(timer)
+      clearErrors('root')
+    }, 250)
+    return () => clearInterval(timer)
+  }, [lock, clearErrors])
 
   if (user) return <Navigate to="/" replace />
 
@@ -27,7 +44,13 @@ export default function Login() {
     try {
       await login(email, password)
     } catch (error) {
-      if (error instanceof ApiError && error.status === 401) setError('root', { message: 'Invalid email or password' })
+      if (error instanceof ApiError && error.status === 429) {
+        setError('root', { message: error.message })
+        if (error.retryAfter) {
+          setSecondsLeft(error.retryAfter)
+          setLock({ seconds: error.retryAfter })
+        }
+      } else if (error instanceof ApiError && error.status === 401) setError('root', { message: 'Invalid email or password' })
       else toast.error(error instanceof Error ? error.message : 'Something went wrong. Please try again.')
     }
   })
@@ -66,9 +89,9 @@ export default function Login() {
               {errors.root.message}
             </p>
           )}
-          <Button type="submit" size="lg" className="mt-2 h-9" disabled={isSubmitting}>
+          <Button type="submit" size="lg" className="mt-2 h-9 tabular-nums" disabled={isSubmitting || secondsLeft > 0}>
             {isSubmitting && <Loader2 className="animate-spin" />}
-            Log in
+            {secondsLeft > 0 ? `Try again in ${secondsLeft}s` : 'Log in'}
           </Button>
         </form>
       </div>

@@ -37,12 +37,15 @@ export class ApiError extends Error {
   status: number
   code: string
   fields?: Record<string, unknown>
+  /** Seconds from the Retry-After header, sent with 429 responses. */
+  retryAfter?: number
 
-  constructor(status: number, code: string, message: string, fields?: Record<string, unknown>) {
+  constructor(status: number, code: string, message: string, fields?: Record<string, unknown>, retryAfter?: number) {
     super(message)
     this.status = status
     this.code = code
     this.fields = fields
+    this.retryAfter = retryAfter
   }
 }
 
@@ -76,7 +79,8 @@ async function send(path: string, init: RequestInit = {}, retry = true): Promise
   if (!res.ok) {
     const body = await res.json().catch(() => null)
     const error = body?.error
-    throw new ApiError(res.status, error?.code ?? 'UNKNOWN', error?.message ?? 'Something went wrong. Please try again.', error?.fields)
+    const retryAfter = Number(res.headers.get('Retry-After')) || undefined
+    throw new ApiError(res.status, error?.code ?? 'UNKNOWN', error?.message ?? 'Something went wrong. Please try again.', error?.fields, retryAfter)
   }
   return res
 }
