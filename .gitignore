@@ -5,7 +5,7 @@ __pycache__/
 .ruff_cache/
 .coverage
 backend/storage/
-frontend/node_modules/
-frontend/dist/
-frontend/test-results/
-frontend/playwright-report/
+frontend-*/node_modules/
+frontend-*/dist/
+frontend-*/test-results/
+frontend-*/playwright-report/

@@ -1,23 +1,26 @@
 .PHONY: setup dev build test e2e migrate seed lint
 
+FRONTENDS := frontend-submitter frontend-reviewer
+
 setup:
 	cd backend && uv sync
-	cd frontend && npm ci
+	for f in $(FRONTENDS); do (cd $$f && npm ci) || exit 1; done
 
 dev: migrate
 	trap 'kill 0' EXIT; \
 	(cd backend && uv run uvicorn app.main:app --reload --port 8000) & \
-	(cd frontend && npm run dev) & \
+	(cd frontend-submitter && npm run dev) & \
+	(cd frontend-reviewer && npm run dev) & \
 	wait
 
 build:
-	cd frontend && npm run build
+	for f in $(FRONTENDS); do (cd $$f && npm run build) || exit 1; done
 
 test:
 	cd backend && uv run pytest
 
 e2e:
-	cd frontend && npx playwright test
+	cd frontend-submitter && npx playwright test
 
 migrate:
 	cd backend && uv run alembic upgrade head
@@ -27,4 +30,4 @@ seed:
 
 lint:
 	cd backend && uv run ruff check .
-	cd frontend && npm run lint
+	for f in $(FRONTENDS); do (cd $$f && npm run lint) || exit 1; done
