@@ -2,16 +2,15 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@ta
 import { LogOut } from 'lucide-react'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter, Outlet, Route, Routes } from 'react-router'
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router'
 import { toast } from 'sonner'
-import { AuthProvider, RequireHome, useAuth } from '@/auth'
+import { AuthProvider, RequireAuth, useAuth } from '@/auth'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import Login from '@/pages/Login'
 import ReviewerPage from '@/pages/ReviewerPage'
-import SubmitterPage from '@/pages/SubmitterPage'
 import './index.css'
 
 const queryClient = new QueryClient({
@@ -58,13 +57,12 @@ createRoot(document.getElementById('root')!).render(
           <TooltipProvider>
             <Routes>
               <Route path="/login" element={<Login />} />
-              <Route element={<RequireHome />}>
+              <Route element={<RequireAuth />}>
                 <Route element={<Layout />}>
-                  <Route path="/submit" element={<SubmitterPage />} />
-                  <Route path="/review" element={<ReviewerPage />} />
+                  <Route index element={<ReviewerPage />} />
                 </Route>
-                <Route path="*" element={null} />
               </Route>
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </TooltipProvider>
         </AuthProvider>

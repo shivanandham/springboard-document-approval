@@ -1,7 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { Navigate, Outlet, useLocation } from 'react-router'
-import { api, setUnauthenticatedHandler, type Me } from '@/api'
+import { Navigate, Outlet } from 'react-router'
+import { api, ApiError, setUnauthenticatedHandler, type Me } from '@/api'
+
+const REQUIRED_PERMISSION = 'document:review'
 
 type Auth = {
   user: Me | null
@@ -10,6 +12,13 @@ type Auth = {
 }
 
 const AuthContext = createContext<Auth | null>(null)
+
+async function authorizedUser() {
+  const user = await api.me()
+  if (user.permissions.includes(REQUIRED_PERMISSION)) return user
+  await api.logout()
+  return null
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
@@ -20,6 +29,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUnauthenticatedHandler(() => setUser(null))
     api
       .restoreSession()
+      .then((restored) => (restored ? authorizedUser() : null))
       .then(setUser)
       .catch(() => setUser(null))
       .finally(() => setReady(true))
@@ -27,7 +37,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string) => {
     await api.login(email, password)
-    setUser(await api.me())
+    const authorized = await authorizedUser()
+    if (!authorized) throw new ApiError(401, 'UNAUTHENTICATED', 'Invalid email or password')
+    setUser(authorized)
   }
 
   const logout = async () => {
@@ -46,12 +58,7 @@ export function useAuth() {
   return auth
 }
 
-export const homePath = (user: Me) => (user.permissions.includes('document:review') ? '/review' : '/submit')
-
-export function RequireHome() {
+export function RequireAuth() {
   const { user } = useAuth()
-  const { pathname } = useLocation()
-  if (!user) return <Navigate to="/login" replace />
-  if (pathname !== homePath(user)) return <Navigate to={homePath(user)} replace />
-  return <Outlet />
+  return user ? <Outlet /> : <Navigate to="/login" replace />
 }

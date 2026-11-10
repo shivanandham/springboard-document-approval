@@ -74,9 +74,7 @@ export const api = {
     const res = await send('/auth/login', { method: 'POST', body: new URLSearchParams({ username: email, password }) }, false)
     accessToken = (await res.json()).access_token
   },
-  async restoreSession() {
-    return (await refresh()) ? api.me() : null
-  },
+  restoreSession: refresh,
   async logout() {
     await send('/auth/logout', { method: 'POST' }, false).catch(() => {})
     accessToken = null

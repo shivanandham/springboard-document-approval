@@ -32,7 +32,7 @@ const STATUS = {
   rejected: { label: 'Rejected', className: 'bg-red-100 text-red-800' },
 }
 
-export function StatusBadge({ doc }: { doc: Document }) {
+function StatusBadge({ doc }: { doc: Document }) {
   const badge = (
     <motion.span key={doc.status} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="inline-flex">
       <Badge className={STATUS[doc.status].className}>{STATUS[doc.status].label}</Badge>
@@ -47,7 +47,7 @@ export function StatusBadge({ doc }: { doc: Document }) {
   )
 }
 
-export function FileLink({ doc }: { doc: Document }) {
+function FileLink({ doc }: { doc: Document }) {
   if (!doc.file) return <span className="text-muted-foreground">—</span>
   return (
     <Button variant="link" className="h-auto max-w-56 justify-start truncate p-0" onClick={() => api.download(doc).catch((error) => toast.error(error.message))}>
@@ -56,7 +56,7 @@ export function FileLink({ doc }: { doc: Document }) {
   )
 }
 
-export function TableMessage({ columns, loading, message }: { columns: number; loading: boolean; message: string }) {
+function TableMessage({ columns, loading, message }: { columns: number; loading: boolean; message: string }) {
   if (loading)
     return Array.from({ length: 3 }, (_, i) => (
       <TableRow key={i}>
@@ -74,7 +74,7 @@ export function TableMessage({ columns, loading, message }: { columns: number; l
   )
 }
 
-export const rowMotion = {
+const rowMotion = {
   initial: { opacity: 0, y: -6 },
   animate: { opacity: 1, y: 0 },
   exit: { opacity: 0, x: 12 },

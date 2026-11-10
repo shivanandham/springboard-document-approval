@@ -7,18 +7,75 @@ import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { z } from 'zod'
 import { api, ApiError, formatDate, type Document, type DocumentStatus } from '@/api'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import { FileLink, rowMotion, StatusBadge, TableMessage } from '@/pages/SubmitterPage'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 type Tab = DocumentStatus | 'all'
 type Decision = { doc: Document; decision: 'approve' | 'reject'; comment?: string }
 
 const schema = z.object({ comment: z.string().trim().min(1, 'A comment is required to reject') })
+
+const STATUS = {
+  pending: { label: 'Pending', className: 'bg-muted text-muted-foreground' },
+  approved: { label: 'Approved', className: 'bg-emerald-100 text-emerald-800' },
+  rejected: { label: 'Rejected', className: 'bg-red-100 text-red-800' },
+}
+
+function StatusBadge({ doc }: { doc: Document }) {
+  const badge = (
+    <motion.span key={doc.status} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="inline-flex">
+      <Badge className={STATUS[doc.status].className}>{STATUS[doc.status].label}</Badge>
+    </motion.span>
+  )
+  if (doc.status !== 'rejected' || !doc.decision_comment) return badge
+  return (
+    <Tooltip>
+      <TooltipTrigger className="cursor-help">{badge}</TooltipTrigger>
+      <TooltipContent className="max-w-xs">{doc.decision_comment}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+function FileLink({ doc }: { doc: Document }) {
+  if (!doc.file) return <span className="text-muted-foreground">—</span>
+  return (
+    <Button variant="link" className="h-auto max-w-56 justify-start truncate p-0" onClick={() => api.download(doc).catch((error) => toast.error(error.message))}>
+      {doc.file.original_name}
+    </Button>
+  )
+}
+
+function TableMessage({ columns, loading, message }: { columns: number; loading: boolean; message: string }) {
+  if (loading)
+    return Array.from({ length: 3 }, (_, i) => (
+      <TableRow key={i}>
+        <TableCell colSpan={columns}>
+          <Skeleton className="h-5 w-full" />
+        </TableCell>
+      </TableRow>
+    ))
+  return (
+    <TableRow>
+      <TableCell colSpan={columns} className="py-10 text-center text-muted-foreground">
+        {message}
+      </TableCell>
+    </TableRow>
+  )
+}
+
+const rowMotion = {
+  initial: { opacity: 0, y: -6 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, x: 12 },
+  className: 'border-b transition-colors hover:bg-muted/50',
+} as const
 
 export default function ReviewerPage() {
   const queryClient = useQueryClient()

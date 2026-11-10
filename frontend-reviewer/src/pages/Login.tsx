@@ -4,7 +4,7 @@ import { Navigate } from 'react-router'
 import { toast } from 'sonner'
 import { z } from 'zod'
 import { ApiError } from '@/api'
-import { homePath, useAuth } from '@/auth'
+import { useAuth } from '@/auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -20,7 +20,7 @@ export default function Login() {
   const { register, handleSubmit, setError, formState } = useForm({ resolver: zodResolver(schema) })
   const { errors, isSubmitting } = formState
 
-  if (user) return <Navigate to={homePath(user)} replace />
+  if (user) return <Navigate to="/" replace />
 
   const onSubmit = handleSubmit(async ({ email, password }) => {
     try {
