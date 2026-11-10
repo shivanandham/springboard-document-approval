@@ -1,10 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
+import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { z } from 'zod'
-import { api, ApiError, formatDate, type Document } from '@/api'
+import { api, ApiError, formatDate, PAGE_SIZE, type Document } from '@/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -81,9 +82,28 @@ const rowMotion = {
   className: 'border-b transition-colors hover:bg-muted/50',
 } as const
 
+function Pagination({ page, total, onChange }: { page: number; total: number; onChange: (page: number) => void }) {
+  if (total <= PAGE_SIZE) return null
+  const start = page * PAGE_SIZE
+  return (
+    <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
+      <span className="mr-2">
+        {start + 1}–{Math.min(start + PAGE_SIZE, total)} of {total}
+      </span>
+      <Button variant="outline" size="sm" disabled={page === 0} onClick={() => onChange(page - 1)}>
+        Prev
+      </Button>
+      <Button variant="outline" size="sm" disabled={start + PAGE_SIZE >= total} onClick={() => onChange(page + 1)}>
+        Next
+      </Button>
+    </div>
+  )
+}
+
 export default function SubmitterPage() {
   const queryClient = useQueryClient()
-  const documents = useQuery({ queryKey: ['documents', 'mine'], queryFn: () => api.listDocuments() })
+  const [page, setPage] = useState(0)
+  const documents = useQuery({ queryKey: ['documents', 'mine', page], queryFn: () => api.listDocuments(page), placeholderData: keepPreviousData })
   const { register, handleSubmit, reset, setError, formState } = useForm({ resolver: zodResolver(schema), defaultValues: { title: '', description: '' } })
   const { errors } = formState
 
@@ -98,6 +118,7 @@ export default function SubmitterPage() {
     onSuccess: () => {
       toast.success('Document submitted')
       reset()
+      setPage(0)
       queryClient.invalidateQueries({ queryKey: ['documents'] })
     },
     onError: (error) => {
@@ -109,6 +130,9 @@ export default function SubmitterPage() {
   })
 
   const items = documents.data?.items ?? []
+  const total = documents.data?.total ?? 0
+  const lastPage = Math.max(0, Math.ceil(total / PAGE_SIZE) - 1)
+  if (page > lastPage) setPage(lastPage)
 
   return (
     <>
@@ -172,6 +196,7 @@ export default function SubmitterPage() {
             </TableBody>
           </Table>
         </div>
+        <Pagination page={page} total={total} onChange={setPage} />
       </section>
     </>
   )

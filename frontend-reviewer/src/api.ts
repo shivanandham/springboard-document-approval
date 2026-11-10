@@ -19,6 +19,8 @@ export type Document = {
   file: { id: string; original_name: string; content_type: string; size_bytes: number; sha256: string; created_at: string } | null
 }
 
+export const PAGE_SIZE = 20
+
 export class ApiError extends Error {
   status: number
   code: string
@@ -80,9 +82,9 @@ export const api = {
     accessToken = null
   },
   me: () => json<Me>('/auth/me'),
-  listDocuments: (status?: DocumentStatus) =>
+  listDocuments: (page: number, status?: DocumentStatus) =>
     json<{ items: Document[]; total: number }>(
-      `/documents?${new URLSearchParams({ ...(status && { status }), limit: '100', offset: '0', sort: '-created_at' })}`,
+      `/documents?${new URLSearchParams({ ...(status && { status }), limit: `${PAGE_SIZE}`, offset: `${page * PAGE_SIZE}`, sort: '-created_at' })}`,
     ),
   createDocument: (body: FormData) => json<Document>('/documents', { method: 'POST', body }),
   decide: (doc: Document, decision: 'approve' | 'reject', comment?: string) =>
