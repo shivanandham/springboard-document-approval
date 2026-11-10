@@ -105,7 +105,8 @@ function DocxViewer({ blob }: { blob: Blob }) {
   )
 }
 
-export default function FileViewer({ id, contentType }: { id: string; contentType: string }) {
+/** Previews a stored document by `id`, or a local `file` that hasn't been uploaded yet. */
+export default function FileViewer({ id, file, contentType }: { id?: string; file?: Blob; contentType: string }) {
   const [state, setState] = useState<{ file?: Loaded; error?: boolean }>({})
   const previewable = PREVIEWABLE.includes(contentType)
 
@@ -113,8 +114,8 @@ export default function FileViewer({ id, contentType }: { id: string; contentTyp
     if (!previewable) return
     let cancelled = false
     let url: string | undefined
-    api
-      .fileBlob(id)
+    const load = file ? Promise.resolve(file) : api.fileBlob(id!)
+    load
       .then(async (blob) => {
         const text = contentType === 'text/plain' ? await blob.text() : undefined
         if (cancelled) return
@@ -126,7 +127,7 @@ export default function FileViewer({ id, contentType }: { id: string; contentTyp
       cancelled = true
       if (url) URL.revokeObjectURL(url)
     }
-  }, [id, contentType, previewable])
+  }, [id, file, contentType, previewable])
 
   if (!previewable)
     return (

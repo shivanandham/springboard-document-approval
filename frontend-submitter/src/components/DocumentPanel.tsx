@@ -10,7 +10,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/componen
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 
-const FileViewer = lazy(() => import('@/components/FileViewer'))
+export const FileViewer = lazy(() => import('@/components/FileViewer'))
 
 const VERB = { submitted: 'submitted the document', approved: 'approved', rejected: 'rejected' }
 const DOT = { submitted: 'bg-primary', approved: 'bg-emerald-500', rejected: 'bg-rose-500' }
