@@ -1,5 +1,5 @@
 import { cn } from 'cn'
-import { ChevronsUpDown, FileCheck, FileImage, FileText, FileType, LogOut, type LucideIcon } from 'lucide-react'
+import { ChevronsUpDown, FileCheck, FileImage, FileText, FileType, LogOut, RotateCw, TriangleAlert, type LucideIcon } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useTheme } from 'next-themes'
 import type { ReactNode } from 'react'
@@ -277,3 +277,24 @@ export const rowMotion = (index: number) => ({
   animate: { opacity: 1, y: 0, transition: { duration: 0.4, delay: Math.min(index, 10) * 0.05 } },
   exit: { opacity: 0, transition: { duration: 0.2 } },
 })
+
+/** Shown by the app-wide error boundary when rendering crashes. */
+export function ErrorFallback() {
+  return (
+    <main className="flex min-h-svh items-center justify-center p-4">
+      <div role="alert" className="grid w-full max-w-sm justify-items-center gap-5 rounded-2xl border bg-card p-8 text-center shadow-sm">
+        <span className="grid size-11 place-items-center rounded-xl bg-muted text-muted-foreground ring-1 ring-foreground/5 ring-inset">
+          <TriangleAlert className="size-5" />
+        </span>
+        <div className="grid gap-1.5">
+          <h1 className="text-lg font-semibold tracking-tight">Something went wrong</h1>
+          <p className="text-sm text-muted-foreground">An unexpected error stopped this page. Reloading usually fixes it.</p>
+        </div>
+        <Button className="h-9 px-4" onClick={() => window.location.reload()}>
+          <RotateCw />
+          Reload
+        </Button>
+      </div>
+    </main>
+  )
+}

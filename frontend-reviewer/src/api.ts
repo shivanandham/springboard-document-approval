@@ -42,6 +42,7 @@ export class ApiError extends Error {
 
   constructor(status: number, code: string, message: string, fields?: Record<string, unknown>, retryAfter?: number) {
     super(message)
+    this.name = 'ApiError'
     this.status = status
     this.code = code
     this.fields = fields
