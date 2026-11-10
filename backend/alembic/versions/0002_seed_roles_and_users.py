@@ -8,9 +8,9 @@ Create Date: 2026-11-10
 import uuid
 
 import sqlalchemy as sa
+from alembic import op
 from argon2 import PasswordHasher
 
-from alembic import op
 from app.config import settings
 
 revision = "0002"
