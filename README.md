@@ -11,7 +11,7 @@ There are two small React apps on one FastAPI API:
 
 Each app accepts only its own role. A reviewer logging into the submitter app gets the same "Invalid email or password" as a wrong password.
 
-Live: [springboard.bixops.in](https://springboard.bixops.in) (submitter) · [springboard-admin.bixops.in](https://springboard-admin.bixops.in) (reviewer) · [API docs](https://springboard.bixops.in/docs). The [design doc](docs/design-doc.md) covers the backend in diagrams.
+Live: [springboard.bixops.in](https://springboard.bixops.in) (submitter) · [springboard-admin.bixops.in](https://springboard-admin.bixops.in) (reviewer) · [API docs (Swagger)](https://springboard.bixops.in/docs). The [design doc](docs/design-doc.md) covers the backend in diagrams.
 
 **Submitter:** a rejected document, with the preview, the reviewer's comment and the audit trail.
 
@@ -48,7 +48,7 @@ Other commands: `make test`, `make e2e`, `make migrate`, `make build`, `make lin
 
 ## API design
 
-Interactive docs: `/docs`. Every error has the same shape:
+Interactive docs: [Swagger in production](https://springboard.bixops.in/docs) (log in with **Authorize** using a seed user), or `/docs` locally. Every error has the same shape:
 
 ```json
 {"error": {"code": "VALIDATION_ERROR", "message": "A comment is required when rejecting a document", "fields": {"comment": "Required when rejecting"}}}
