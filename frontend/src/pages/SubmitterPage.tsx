@@ -26,16 +26,16 @@ const schema = z.object({
     .refine((files) => ACCEPTED.some((ext) => files[0]?.name.toLowerCase().endsWith(ext)), 'Accepted types: PDF, DOCX, PNG, JPG, TXT'),
 })
 
-const STATUS_STYLES = {
-  pending: 'bg-muted text-muted-foreground',
-  approved: 'bg-emerald-100 text-emerald-800',
-  rejected: 'bg-red-100 text-red-800',
+const STATUS = {
+  pending: { label: 'Pending', className: 'bg-muted text-muted-foreground' },
+  approved: { label: 'Approved', className: 'bg-emerald-100 text-emerald-800' },
+  rejected: { label: 'Rejected', className: 'bg-red-100 text-red-800' },
 }
 
 export function StatusBadge({ doc }: { doc: Document }) {
   const badge = (
     <motion.span key={doc.status} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="inline-flex">
-      <Badge className={`capitalize ${STATUS_STYLES[doc.status]}`}>{doc.status}</Badge>
+      <Badge className={STATUS[doc.status].className}>{STATUS[doc.status].label}</Badge>
     </motion.span>
   )
   if (doc.status !== 'rejected' || !doc.decision_comment) return badge
