@@ -32,13 +32,17 @@ const REJECTED: Record<string, string> = { 'file-too-large': 'File is larger tha
 const schema = z.object({
   title: z.string().trim().min(1, 'Title is required').max(200, 'Title must be at most 200 characters'),
   description: z.string().trim(),
+  // No file is null, not undefined: a remounted controller falls back to its first value on undefined.
   file: z
-    .instanceof(File, { message: 'Choose a file' })
+    .instanceof(File)
+    .nullable()
+    .pipe(z.instanceof(File, { message: 'Choose a file' }))
     .refine((file) => ACCEPTED.some((ext) => file.name.toLowerCase().endsWith(ext)), 'Accepted types: PDF, DOCX, PNG, JPG, TXT')
     .refine((file) => file.size <= MAX_BYTES, 'The file must be 10 MB or smaller'),
 })
 
 type Values = z.input<typeof schema>
+const EMPTY: Values = { title: '', description: '', file: null }
 
 type DropZoneProps = {
   control: Control<Values>
@@ -51,7 +55,7 @@ type DropZoneProps = {
 /** Empty, a drop target; with a file, a live preview of it that another drop replaces. */
 function DropZone({ control, uploading, invalid, onReject }: DropZoneProps) {
   const { field } = useController({ control, name: 'file' })
-  const file = field.value as File | undefined
+  const file = field.value
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: ACCEPT,
     maxSize: MAX_BYTES,
@@ -60,7 +64,7 @@ function DropZone({ control, uploading, invalid, onReject }: DropZoneProps) {
     noClick: !!file,
     noKeyboard: !!file,
     onDrop: (accepted, rejected) => {
-      if (accepted[0] || !file) field.onChange(accepted[0])
+      if (accepted[0] || !file) field.onChange(accepted[0] ?? null)
       const code = rejected[0]?.errors[0]?.code
       onReject(code ? (REJECTED[code] ?? 'Choose a single PDF, DOCX, PNG, JPG or TXT file') : undefined)
     },
@@ -85,7 +89,7 @@ function DropZone({ control, uploading, invalid, onReject }: DropZoneProps) {
               <p className="truncate text-sm font-medium">{file.name}</p>
               <p className="text-xs text-muted-foreground">{uploading ? 'Uploading…' : isDragActive ? 'Drop to replace' : formatSize(file.size)}</p>
             </div>
-            <Button type="button" variant="ghost" size="icon-sm" aria-label="Remove file" disabled={uploading} onClick={() => field.onChange(undefined)}>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="Remove file" disabled={uploading} onClick={() => field.onChange(null)}>
               <X />
             </Button>
             {uploading && (
@@ -162,14 +166,15 @@ function DocumentRow({ doc, index, selected, onOpen }: { doc: Document; index: n
   )
 }
 
-function NewDocumentForm({ onCreated, onCancel }: { onCreated: (doc: Document) => void; onCancel: () => void }) {
+/** The new-document form state. It lives in the page so it survives the switch between the docked pane and the sheet. */
+function useDraft(onCreated: (doc: Document) => void) {
   const queryClient = useQueryClient()
   const [rejectedPick, setRejectedPick] = useState<string>()
-  const { register, control, handleSubmit, reset, setError, formState } = useForm<Values, unknown, z.output<typeof schema>>({
-    resolver: zodResolver(schema),
-    defaultValues: { title: '', description: '' },
-  })
-  const { errors } = formState
+  const form = useForm<Values, unknown, z.output<typeof schema>>({ resolver: zodResolver(schema), defaultValues: EMPTY })
+  const clear = () => {
+    form.reset(EMPTY)
+    setRejectedPick(undefined)
+  }
 
   const submit = useMutation({
     mutationFn: (values: z.output<typeof schema>) => {
@@ -182,17 +187,26 @@ function NewDocumentForm({ onCreated, onCancel }: { onCreated: (doc: Document) =
     onSuccess: (doc) => {
       toast.success('Document submitted')
       queryClient.invalidateQueries({ queryKey: ['documents'] })
+      clear()
       onCreated(doc)
     },
     onError: (error) => {
       toast.error(error.message)
       if (!(error instanceof ApiError)) return
       for (const [field, message] of Object.entries(error.fields ?? {}))
-        if (field in schema.shape) setError(field as keyof typeof schema.shape, { message: String(message) })
+        if (field in schema.shape) form.setError(field as keyof typeof schema.shape, { message: String(message) })
       // The server is the final word on size and type; show its message on the file field.
-      if (error.status === 413 || error.status === 415) setError('file', { message: error.message })
+      if (error.status === 413 || error.status === 415) form.setError('file', { message: error.message })
     },
   })
+
+  return { form, submit, rejectedPick, setRejectedPick, clear }
+}
+
+function NewDocumentForm({ draft, onCancel }: { draft: ReturnType<typeof useDraft>; onCancel: () => void }) {
+  const { form, submit, rejectedPick, setRejectedPick } = draft
+  const { register, control, handleSubmit, formState } = form
+  const { errors } = formState
 
   return (
     <form onSubmit={handleSubmit((values) => submit.mutate(values))} className="@container flex h-full min-h-0 flex-col" noValidate>
@@ -226,11 +240,7 @@ function NewDocumentForm({ onCreated, onCancel }: { onCreated: (doc: Document) =
           variant="outline"
           className="h-9 px-4"
           disabled={submit.isPending}
-          onClick={() => {
-            reset()
-            setRejectedPick(undefined)
-            onCancel()
-          }}
+          onClick={onCancel}
         >
           Cancel
         </Button>
@@ -243,49 +253,61 @@ function NewDocumentForm({ onCreated, onCancel }: { onCreated: (doc: Document) =
   )
 }
 
+/** A document, the new-document form, or nothing (docked, nothing shows the form; narrow, the sheet is closed). */
+type Pane = Document | 'new' | null
+
 export default function SubmitterPage() {
   const wide = useWide()
   const [page, setPage] = useState(0)
-  // No selection means the pane holds the new-document form.
-  const [selected, setSelected] = useState<Document | null>(null)
-  const [open, setOpen] = useState(false)
+  const [pane, setPane] = useState<Pane>(null)
   const documents = useQuery({ queryKey: ['documents', 'mine', page], queryFn: () => api.listDocuments(page), placeholderData: keepPreviousData })
+  const draft = useDraft((doc) => {
+    setPage(0)
+    setPane(doc)
+  })
+
+  // Narrowing the window with a half-filled form keeps it on screen in the sheet.
+  const { isDirty } = draft.form.formState
+  const [wasWide, setWasWide] = useState(wide)
+  if (wide !== wasWide) {
+    setWasWide(wide)
+    if (!wide && pane === null && isDirty) setPane('new')
+  }
+  // Keep the last content while the sheet animates closed.
+  const [shown, setShown] = useState<Pane>(pane)
+  if (pane !== null && pane !== shown) setShown(pane)
+  const view = pane ?? (wide ? 'new' : shown)
 
   const items = documents.data?.items ?? []
   const total = documents.data?.total ?? 0
   const lastPage = Math.max(0, Math.ceil(total / PAGE_SIZE) - 1)
   if (page > lastPage) setPage(lastPage)
-
-  const show = (doc: Document | null) => {
-    setSelected(doc)
-    setOpen(true)
-  }
+  const selected = view !== 'new' ? view : null
 
   return (
     <>
       <PageHeading title="My documents" subtitle="Submit documents for review and track their status.">
-        <Button className="h-9 px-4" onClick={() => show(null)}>
-          <Plus />
-          New document
-        </Button>
+        {!(wide && view === 'new') && (
+          <Button className="h-9 px-4" onClick={() => setPane('new')}>
+            <Plus />
+            New document
+          </Button>
+        )}
       </PageHeading>
 
       <SplitView
         title={selected?.title ?? 'New document'}
-        open={open}
-        onClose={() => setOpen(false)}
+        open={pane !== null}
+        onClose={() => setPane(null)}
         detail={
           selected ? (
             <DocumentView key={selected.id} doc={selected} />
           ) : (
             <NewDocumentForm
-              onCreated={(doc) => {
-                setPage(0)
-                show(doc)
-              }}
+              draft={draft}
               onCancel={() => {
-                setOpen(false)
-                if (wide && items[0]) setSelected(items[0])
+                draft.clear()
+                setPane(null)
               }}
             />
           )
@@ -304,7 +326,7 @@ export default function SubmitterPage() {
                   {items.length === 0 && <TablePlaceholder columns={2} loading={documents.isPending} icon={FileStack} message="No documents yet. Your submissions will appear here." />}
                   <AnimatePresence>
                     {items.map((doc, index) => (
-                      <DocumentRow key={doc.id} doc={doc} index={index} selected={wide && selected?.id === doc.id} onOpen={() => show(doc)} />
+                      <DocumentRow key={doc.id} doc={doc} index={index} selected={wide && selected?.id === doc.id} onOpen={() => setPane(doc)} />
                     ))}
                   </AnimatePresence>
                 </TableBody>

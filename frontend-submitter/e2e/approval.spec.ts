@@ -21,7 +21,7 @@ test('submitter sees a reviewer rejection with its comment', async ({ page }) =>
   const comment = 'Receipts are missing for the hotel stay.'
 
   await login(page, SUBMITTER_APP, 'sam.submitter@docflow.dev', 'submitter123')
-  await page.getByRole('button', { name: 'New document' }).click()
+  // At 1280px the new-document form is docked beside the list by default.
   await page.getByLabel('Title').fill(title)
   await page.getByLabel('File').setInputFiles({ name: 'report.txt', mimeType: 'text/plain', buffer: Buffer.from('Q3 expenses') })
   await page.getByRole('button', { name: 'Submit' }).click()

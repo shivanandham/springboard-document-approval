@@ -64,10 +64,10 @@ export default function ReviewerPage() {
   const [tab, setTab] = useState<Tab>('pending')
   const [page, setPage] = useState(0)
   const [rejecting, setRejecting] = useState<Document | null>(null)
+  // The selection is shared by the docked pane and the sheet, so a resize across 1280px keeps it.
   const [selected, setSelected] = useState<Document | null>(null)
   // Set when a decision leaves nothing pending, so the docked pane stops auto-selecting.
   const [caughtUp, setCaughtUp] = useState(false)
-  const [open, setOpen] = useState(false)
   const documents = useQuery({
     queryKey: ['documents', tab, page],
     queryFn: () => api.listDocuments(page, tab === 'all' ? undefined : tab),
@@ -79,13 +79,16 @@ export default function ReviewerPage() {
   const total = documents.data?.total ?? 0
   const lastPage = Math.max(0, Math.ceil(total / PAGE_SIZE) - 1)
   if (page > lastPage) setPage(lastPage)
-  // Docked, the pane always shows something: the selection, else the first row of the tab.
-  const current = selected ?? (wide && !caughtUp && !documents.isPlaceholderData ? (items[0] ?? null) : null)
+  // Docked, an empty pane selects the first row of the tab; an existing selection is never replaced.
+  if (wide && !selected && !caughtUp && !documents.isPlaceholderData && items[0]) setSelected(items[0])
+  // Keep the last document while the sheet animates closed.
+  const [shown, setShown] = useState(selected)
+  if (selected && selected !== shown) setShown(selected)
+  const current = selected ?? (wide ? null : shown)
 
   const select = (doc: Document | null) => {
     setSelected(doc)
     setCaughtUp(false)
-    setOpen(!!doc)
   }
 
   const decide = useMutation({
@@ -93,10 +96,11 @@ export default function ReviewerPage() {
     onSuccess: (doc) => {
       toast.success(`“${doc.title}” ${doc.status}`)
       setRejecting(null)
+      // Advance only when the decision was made on the open document, not from a row in the narrow list.
+      if (selected?.id !== doc.id) return
       const next = nextPending(items, doc)
       setSelected(next)
       setCaughtUp(!next)
-      if (!next) setOpen(false)
     },
     onError: (error) => {
       if (error instanceof ApiError && error.status === 409) {
@@ -137,8 +141,8 @@ export default function ReviewerPage() {
 
       <SplitView
         title={current?.title ?? 'Review queue'}
-        open={open}
-        onClose={() => setOpen(false)}
+        open={!!selected}
+        onClose={() => select(null)}
         detail={
           current ? (
             <DocumentView
