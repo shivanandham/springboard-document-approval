@@ -29,6 +29,14 @@ async def test_login_success(client, make_user, login):
     assert "HttpOnly" in cookie
     assert "Path=/api/auth" in cookie
     assert "SameSite=lax" in cookie
+    assert "Secure" not in cookie
+
+
+async def test_cookie_secure_setting(client, make_user, login, monkeypatch):
+    monkeypatch.setattr(settings, "cookie_secure", True)
+    await make_user("submitter", email="sam@example.com")
+    assert "Secure" in (await login("sam@example.com")).headers["set-cookie"]
+    assert "Secure" in (await client.post("/api/auth/logout")).headers["set-cookie"]
 
 
 async def test_login_wrong_password(client, make_user, login):

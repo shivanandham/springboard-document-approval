@@ -24,6 +24,7 @@ def _tokens(response: Response, user: User, refresh_token: str) -> TokenOut:
         path=COOKIE_PATH,
         httponly=True,
         samesite="lax",
+        secure=settings.cookie_secure,
     )
     return TokenOut(access_token=security.create_access_token(user))
 
@@ -54,7 +55,9 @@ async def refresh(response: Response, session: SessionDep, token: RefreshCookie 
 async def logout(response: Response, session: SessionDep, token: RefreshCookie = None) -> None:
     if token:
         await security.revoke_refresh_token(session, token)
-    response.delete_cookie(COOKIE, path=COOKIE_PATH, httponly=True, samesite="lax")
+    response.delete_cookie(
+        COOKIE, path=COOKIE_PATH, httponly=True, samesite="lax", secure=settings.cookie_secure
+    )
 
 
 @router.get("/me", summary="The current user with their roles and permissions")

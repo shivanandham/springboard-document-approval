@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     jwt_secret: str
     access_token_ttl_minutes: int = 15
     refresh_token_ttl_days: int = 7
+    cookie_secure: bool = False
     max_upload_mb: int = 10
     storage_dir: Path = Path("./storage")
     cors_origins: str = ""
