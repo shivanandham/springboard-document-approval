@@ -182,6 +182,7 @@ Uploads are streamed to disk in 1 MB chunks and hashed as they're written. Uploa
 - **Two frontend apps.** The submitter and reviewer get separate deployable apps on separate domains. They share no code at runtime, so each one stays small and obvious.
 - **Auth.** Access tokens are JWTs that live for 15 minutes and are kept in memory only. Refresh tokens are random, stored only as a sha256 hash, sent as an httpOnly SameSite=Lax cookie (`Secure` when `COOKIE_SECURE=true`) and rotated on every use. Reusing a rotated token revokes the whole token family. Login is rate limited in memory (sliding window, single worker): 5 attempts a minute per client IP and email, and 20 per client IP.
 - **Logging.** One JSON line per request on stdout (method, path, status, duration_ms, request_id, user_id), at `LOG_LEVEL` (default INFO). Each response carries an `X-Request-ID` (a sane incoming one is kept). A 500 is logged with its traceback, and its message includes the request id so users can quote it. Headers, bodies, passwords and tokens are never logged. Uvicorn's own access log duplicates the request line, so production can run it with `--no-access-log`.
+- **Error reporting.** Sentry is switched on only when `SENTRY_DSN` is set (`SENTRY_ENVIRONMENT`, `SENTRY_TRACES_SAMPLE_RATE` default to `development` and `0.0`). Unhandled exceptions are reported once, tagged with the request id, without default PII. Expected 4xx errors aren't reported.
 
 ## Tests
 

@@ -6,6 +6,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
+import sentry_sdk
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -127,6 +128,14 @@ async def lifespan(_: FastAPI):
 
 def create_app() -> FastAPI:
     configure_logging()
+    if settings.sentry_dsn:
+        # The FastAPI integration is enabled automatically and only reports 5xx errors. PII stays
+        # off by default; this SDK deprecates passing send_default_pii=False explicitly.
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            environment=settings.sentry_environment,
+            traces_sample_rate=settings.sentry_traces_sample_rate,
+        )
     app = FastAPI(title="DocFlow API", lifespan=lifespan)
     app.add_middleware(UploadSizeLimit)
     app.add_middleware(  # wraps the upload check so early 413s get CORS headers
@@ -162,7 +171,12 @@ def create_app() -> FastAPI:
     async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
         # Runs outside the middleware stack, so it sets X-Request-ID itself.
         request_id = request.state.request_id
-        logger.error("unhandled error", exc_info=exc, extra={"request_id": request_id})
+        # Sentry's logging integration reports the logged error; capture_exception covers the
+        # case where it's disabled. Dedupe drops repeats of the same exception, so it's sent once.
+        with sentry_sdk.new_scope() as scope:
+            scope.set_tag("request_id", request_id)
+            logger.error("unhandled error", exc_info=exc, extra={"request_id": request_id})
+            sentry_sdk.capture_exception(exc)
         message = f"Something went wrong. Reference: {request_id}"
         return _error(500, "INTERNAL_ERROR", message, headers={"X-Request-ID": request_id})
 

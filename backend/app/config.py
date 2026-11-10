@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     storage_dir: Path = Path("./storage")
     cors_origins: str = ""
     log_level: str = "INFO"
+    sentry_dsn: str | None = None
+    sentry_environment: str = "development"
+    sentry_traces_sample_rate: float = 0.0
     seed_submitter_password: str
     seed_reviewer_password: str
 

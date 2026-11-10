@@ -4,9 +4,12 @@ import re
 import uuid
 
 import pytest
+import sentry_sdk
 from httpx import ASGITransport, AsyncClient
+from sentry_sdk.transport import Transport
 
-from app.main import JsonFormatter, app
+from app.config import settings
+from app.main import JsonFormatter, app, create_app
 
 ANON, SUBMITTER, REVIEWER, OTHER = "anonymous", "submitter", "reviewer", "other_submitter"
 
@@ -83,12 +86,12 @@ async def test_malformed_json_uses_error_shape(client, auth, make_user):
     assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
-async def server_error(monkeypatch, headers=None):
+async def server_error(monkeypatch, headers=None, target=app):
     async def boom(*_):
         raise RuntimeError("kaboom")
 
     monkeypatch.setattr("sqlalchemy.ext.asyncio.AsyncSession.execute", boom)
-    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    transport = ASGITransport(app=target, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         return await c.get("/api/health", headers=headers)
 
@@ -151,3 +154,38 @@ async def test_request_log_line(client, auth, make_user, login, caplog):
     logged = caplog.text + "".join(map(json.dumps, lines))
     for secret in (token, auth(user)["Authorization"], "correct-horse-battery", "refresh_token"):
         assert secret not in logged
+
+
+@pytest.fixture
+def sentry(monkeypatch):
+    """An app with Sentry enabled whose events land in a list instead of the network."""
+    events = []
+
+    class Capture(Transport):
+        def capture_envelope(self, envelope):
+            if event := envelope.get_event():
+                events.append(event)
+
+    monkeypatch.setattr(settings, "sentry_dsn", "https://key@sentry.invalid/1")
+    sentry_app = create_app()
+    client = sentry_sdk.get_client()
+    client.transport.kill()
+    client.transport = Capture()
+    yield sentry_app, events
+    sentry_sdk.init()  # back to a disabled client
+
+
+async def test_sentry_reports_500_once_with_request_id(monkeypatch, sentry):
+    sentry_app, events = sentry
+    await server_error(monkeypatch, {"X-Request-ID": "req-sentry"}, target=sentry_app)
+    (event,) = events
+    assert event["exception"]["values"][-1]["value"] == "kaboom"
+    assert event["tags"]["request_id"] == "req-sentry"
+
+
+async def test_sentry_ignores_expected_errors(sentry):
+    sentry_app, events = sentry
+    async with AsyncClient(transport=ASGITransport(app=sentry_app), base_url="http://test") as c:
+        assert (await c.get("/api/auth/me")).status_code == 401
+        assert (await c.get("/api/nope")).status_code == 404
+    assert events == []
